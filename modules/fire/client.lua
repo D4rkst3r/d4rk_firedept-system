@@ -126,8 +126,18 @@ function UpdateFirePoint(fireId, updatedData)
     if not fire then return end
 
     -- Update Werte
+    local oldIntensity = fire.intensity
     fire.intensity = updatedData.intensity or fire.intensity
     fire.radius = updatedData.radius or fire.radius
+
+    -- Update Particle-Effekt Scale
+    if fire.smokeHandle and oldIntensity ~= fire.intensity then
+        SetParticleFxLoopedScale(fire.smokeHandle, fire.intensity * 1.5)
+    end
+
+    if fire.flameHandle and oldIntensity ~= fire.intensity then
+        SetParticleFxLoopedScale(fire.flameHandle, fire.intensity * 1.0)
+    end
 
     if Config.Fire.Debug then
         print(string.format(
@@ -143,31 +153,97 @@ end
 -- SMOKE EFFECT
 -- =============================================================================
 
+-- =============================================================================
+-- SMOKE & FLAME EFFECTS (IMPROVED)
+-- =============================================================================
+
 function CreateSmokeEffect(fireId)
     local fire = activeFires[fireId]
     if not fire then return end
 
     Citizen.CreateThread(function()
-        local particleDict = "core"
+        -- =========================================================================
+        -- PARTICLE ASSETS LADEN (wie FireScript)
+        -- =========================================================================
 
-        RequestNamedPtfxAsset(particleDict)
-        while not HasNamedPtfxAssetLoaded(particleDict) do
+        -- Asset 1: Für Rauch
+        local smokeAsset = "scr_agencyheistb"
+        RequestNamedPtfxAsset(smokeAsset)
+        while not HasNamedPtfxAssetLoaded(smokeAsset) do
             Citizen.Wait(10)
         end
 
-        UseParticleFxAssetNextCall(particleDict)
+        -- Asset 2: Für Flammen
+        local flameAsset = "scr_trevor3"
+        RequestNamedPtfxAsset(flameAsset)
+        while not HasNamedPtfxAssetLoaded(flameAsset) do
+            Citizen.Wait(10)
+        end
+
+        -- =========================================================================
+        -- RAUCH-EFFEKT (Schwarz/Grau)
+        -- =========================================================================
+
+        UseParticleFxAssetNextCall(smokeAsset)
 
         local smokeHandle = StartParticleFxLoopedAtCoord(
-            "exp_grd_bzgas_smoke",
+            "scr_env_agency3b_smoke", -- Besserer Rauch-Effekt
             fire.coords.x,
             fire.coords.y,
-            fire.coords.z + 0.5,
-            0.0, 0.0, 0.0,
-            fire.intensity * 2.0,
+            fire.coords.z + 1.0,  -- Etwas höher
+            0.0, 0.0, 0.0,        -- Rotation
+            fire.intensity * 1.5, -- Scale basierend auf Intensität
             false, false, false, false
         )
 
         fire.smokeHandle = smokeHandle
+
+        -- =========================================================================
+        -- FLAMMEN-EFFEKT (Orange/Rot Glut)
+        -- =========================================================================
+
+        UseParticleFxAssetNextCall(flameAsset)
+
+        local flameHandle = StartParticleFxLoopedAtCoord(
+            "scr_trev3_trailer_plume", -- Flammen/Glut-Effekt
+            fire.coords.x,
+            fire.coords.y,
+            fire.coords.z + 1.2,  -- Etwas über Rauch
+            0.0, 0.0, 0.0,        -- Rotation
+            fire.intensity * 1.0, -- Scale
+            false, false, false, false
+        )
+
+        fire.flameHandle = flameHandle
+
+        -- =========================================================================
+        -- SOUND-EFFEKT (Feuer-Knistern)
+        -- =========================================================================
+
+        local soundId = GetSoundId()
+        PlaySoundFromCoord(
+            soundId,
+            "LAMAR1_WAREHOUSE_FIRE", -- Sound-Name
+            fire.coords.x,
+            fire.coords.y,
+            fire.coords.z,
+            0,     -- Range (0 = default)
+            false, -- Unknown
+            0,     -- Unknown
+            false  -- Unknown
+        )
+
+        fire.soundId = soundId
+
+        if Config.Fire.Debug then
+            print(string.format(
+                "^2[Fire Module] Effects created for fire #%s (Smoke: %s, Flames: %s, Sound: %s)^0",
+                fireId,
+                tostring(smokeHandle),
+                tostring(flameHandle),
+                tostring(soundId)
+            ))
+        end
     end)
 end
 
@@ -280,16 +356,52 @@ function ExtinguishFirePoint(fireId)
     local fire = activeFires[fireId]
     if not fire then return end
 
-    RemoveScriptFire(fire.handle)
-
-    if fire.smokeHandle then
-        StopParticleFxLooped(fire.smokeHandle, false)
+    -- Native-Feuer löschen
+    if fire.handle then
+        RemoveScriptFire(fire.handle)
     end
 
+    -- Rauch-Effect löschen (mit Fade-Out wie FireScript)
+    if fire.smokeHandle then
+        local smokeHandle = fire.smokeHandle
+        Citizen.SetTimeout(5000, function()
+            StopParticleFxLooped(smokeHandle, false)
+            Citizen.Wait(1500)
+            RemoveParticleFx(smokeHandle, true)
+        end)
+    end
+
+    -- Flammen-Effect löschen (mit Scaling-Animation wie FireScript)
+    if fire.flameHandle then
+        local flameHandle = fire.flameHandle
+        local soundId = fire.soundId
+
+        Citizen.CreateThread(function()
+            -- Scaling-Animation: Flammen werden kleiner
+            local scale = 1.0
+            while scale > 0.3 do
+                scale = scale - 0.01
+                SetParticleFxLoopedScale(flameHandle, scale)
+                Citizen.Wait(60)
+            end
+
+            -- Sound stoppen
+            if soundId then
+                StopSound(soundId)
+                ReleaseSoundId(soundId)
+            end
+
+            -- Flammen entfernen
+            StopParticleFxLooped(flameHandle, false)
+            RemoveParticleFx(flameHandle, true)
+        end)
+    end
+
+    -- Aus Tabelle entfernen
     activeFires[fireId] = nil
 
     if Config.Fire.Debug then
-        print("^3[Fire Module] Extinguished fire #" .. fireId .. "^0")
+        print("^3[Fire Module] Extinguished fire #" .. fireId .. " (with animation)^0")
     end
 end
 
