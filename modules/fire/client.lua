@@ -318,18 +318,14 @@ function StartInteractionLoop()
                     end
 
                     -- 3D Text
-                    DrawText3D(fire.coords + vector3(0, 0, 1.0), "~g~[E]~w~ Feuer löschen")
+                    ClientUtils.DrawText3D(fire.coords + vector3(0, 0, 1.0), "~g~[E]~w~ Feuer löschen")
 
                     -- Marker (mit korrigierten Parametern)
-                    DrawMarker(
+                    ClientUtils.DrawMarker(
+                        fire.coords,
                         20,
-                        fire.coords.x, fire.coords.y, fire.coords.z - 0.98,
-                        0.0, 0.0, 0.0,
-                        0.0, 0.0, 0.0,
-                        1.5, 1.5, 0.5,
-                        255, 0, 0, 100,
-                        false, true, 2, false,
-                        nil, nil, false
+                        { r = 255, g = 0, b = 0, a = 100 },
+                        1.5
                     )
                     break
                 end
@@ -340,30 +336,4 @@ function StartInteractionLoop()
 
         print("^1[Fire Module] Interaction Loop stopped^0")
     end)
-end
-
-function DrawText3D(coords, text)
-    local onScreen, _x, _y = World3dToScreen2d(coords.x, coords.y, coords.z)
-
-    if onScreen then
-        local dist = #(GetGameplayCamCoords() - coords)
-        local scale = (1 / dist) * 2
-        local fov = (1 / GetGameplayCamFov()) * 100
-        scale = scale * fov
-
-        SetTextScale(0.0 * scale, 0.55 * scale)
-        SetTextFont(4)
-        SetTextProportional(true)
-        SetTextColour(255, 255, 255, 215)
-        SetTextDropshadow(0, 0, 0, 0, 255)
-        SetTextEdge(2, 0, 0, 0, 150)
-        SetTextDropShadow()
-        SetTextOutline()
-        SetTextEntry("STRING")
-        SetTextCentre(true)
-        AddTextComponentString(text)
-        SetDrawOrigin(coords.x, coords.y, coords.z, 0)
-        DrawText(0.0, 0.0)
-        ClearDrawOrigin()
-    end
 end

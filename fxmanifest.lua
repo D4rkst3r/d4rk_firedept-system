@@ -12,6 +12,7 @@ lua54 'yes'
 -- Shared Files (laufen auf Client UND Server)
 shared_scripts {
     'config.lua',
+    'shared/functions.lua',
     'modules/fire/config.lua' -- Fire Module Config laden
 }
 
@@ -24,5 +25,6 @@ server_scripts {
 -- Client-only Files
 client_scripts {
     'core/main.lua',
+    'core/utils.lua',
     'modules/fire/client.lua'
 }
