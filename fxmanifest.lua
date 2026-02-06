@@ -17,6 +17,7 @@ shared_scripts {
 
 -- Server-only Files
 server_scripts {
+    'core/permissions.lua', -- Rechteverwaltung
     'modules/fire/server.lua'
 }
 

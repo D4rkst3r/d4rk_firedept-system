@@ -8,9 +8,8 @@
 -- =============================================================================
 
 -- Lokale Variablen (nur für dieses Script sichtbar)
-local activeFires = {}       -- { [fireId] = fireData }
-local fireIdCounter = 1      -- Auto-Increment ID Generator
-local playerPermissions = {} -- { [source] = permissionLevel }
+local activeFires = {}  -- { [fireId] = fireData }
+local fireIdCounter = 1 -- Auto-Increment ID Generator
 
 -- =============================================================================
 -- UTILITY FUNCTIONS
@@ -59,7 +58,7 @@ function CreateFire(coords, class, intensity, radius, source)
     ]]
 
     -- Validierung: Ist der Spieler berechtigt?
-    if source and not HasPermission(source, 'admin') then
+    if not Permissions.HasPermission(source, 'admin') then
         print(string.format("^1[Fire Module] Player %s tried to spawn fire without permission!^0", GetPlayerName(source)))
         TriggerClientEvent('chat:addMessage', source, {
             color = { 255, 0, 0 },
@@ -290,67 +289,13 @@ AddEventHandler('firedept:server:attemptExtinguish', function(fireId, toolType)
 end)
 
 -- =============================================================================
--- PERMISSION SYSTEM - Simpel aber effektiv
--- =============================================================================
-
--- WARUM ein eigenes System?
--- Standalone = keine Abhängigkeit zu ESX/QBCore Permission-System
-function HasPermission(source, level)
-    --[[
-        Permission-Levels:
-        - 'user' = Normaler Spieler (default)
-        - 'firefighter' = Fire Department Member
-        - 'officer' = Officer (mehr Config-Zugriff)
-        - 'chief' = Fire Chief (fast alles)
-        - 'admin' = Server Admin (alles)
-    ]]
-
-    -- Cache-Check (Performance)
-    if playerPermissions[source] then
-        return CheckPermissionLevel(playerPermissions[source], level)
-    end
-
-    -- Erste Check: Ist Spieler FiveM Admin?
-    -- WICHTIG: Das ist der "Ace" System von FiveM
-    if IsPlayerAceAllowed(source, "command") then
-        playerPermissions[source] = 'admin'
-        return true
-    end
-
-    -- Fallback: Normaler User
-    playerPermissions[source] = 'user'
-    return CheckPermissionLevel('user', level)
-end
-
-function CheckPermissionLevel(playerLevel, requiredLevel)
-    -- Hierarchie-System
-    local hierarchy = {
-        user = 0,
-        firefighter = 1,
-        officer = 2,
-        chief = 3,
-        admin = 4
-    }
-
-    return (hierarchy[playerLevel] or 0) >= (hierarchy[requiredLevel] or 0)
-end
-
--- Permissions zurücksetzen wenn Spieler disconnected
-AddEventHandler('playerDropped', function()
-    local _source = source
-    if playerPermissions[_source] then
-        playerPermissions[_source] = nil
-    end
-end)
-
--- =============================================================================
 -- ADMIN COMMANDS
 -- =============================================================================
 
 -- COMMAND: /firespawn
 RegisterCommand('firespawn', function(source, args, rawCommand)
     -- Permission-Check
-    if not HasPermission(source, 'admin') then
+    if not Permissions.HasPermission(source, 'admin') then
         TriggerClientEvent('chat:addMessage', source, {
             color = { 255, 0, 0 },
             args = { "System", "Keine Berechtigung!" }
@@ -393,7 +338,7 @@ end, false)
 
 -- COMMAND: /fireextinguish [fireId]
 RegisterCommand('fireextinguish', function(source, args, rawCommand)
-    if not HasPermission(source, 'admin') then
+    if not Permissions.HasPermission(source, 'admin') then
         return
     end
 
@@ -424,7 +369,7 @@ end, false)
 
 -- COMMAND: /firelist
 RegisterCommand('firelist', function(source, args, rawCommand)
-    if not HasPermission(source, 'admin') then
+    if not Permissions.HasPermission(source, 'admin') then
         return
     end
 
@@ -553,7 +498,7 @@ end)
 
 -- Admin-Command für Statistiken
 RegisterCommand('firestats', function(source, args, rawCommand)
-    if not HasPermission(source, 'admin') then
+    if not Permissions.HasPermission(source, 'admin') then
         return
     end
 
