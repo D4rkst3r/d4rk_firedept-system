@@ -1,0 +1,560 @@
+-- =============================================================================
+-- FIRE MODULE - SERVER SIDE
+-- =============================================================================
+-- WARUM Server-Side?
+-- 1. AUTORITÄT: Server entscheidet was "wahr" ist (Anti-Cheat)
+-- 2. SYNCHRONISATION: Alle Spieler sehen dasselbe Feuer
+-- 3. PERSISTENZ: Feuer bleiben bestehen wenn Spieler disconnecten
+-- =============================================================================
+
+-- Lokale Variablen (nur für dieses Script sichtbar)
+local activeFires = {}       -- { [fireId] = fireData }
+local fireIdCounter = 1      -- Auto-Increment ID Generator
+local playerPermissions = {} -- { [source] = permissionLevel }
+
+-- =============================================================================
+-- INIT: Wird beim Ressource-Start aufgerufen
+-- =============================================================================
+
+Citizen.CreateThread(function()
+    print("^2[Fire Module - Server] Initializing...^0")
+
+    -- Lade gespeicherte Feuer (falls vorhanden)
+    LoadPersistedFires()
+
+    -- Starte Auto-Save Timer
+    StartAutoSave()
+
+    print("^2[Fire Module - Server] Ready!^0")
+end)
+
+-- =============================================================================
+-- FIRE CREATION - Die Hauptfunktion
+-- =============================================================================
+
+-- WARUM RegisterNetEvent + AddEventHandler?
+-- Client sendet Event → Server empfängt → verarbeitet → sendet an ALLE Clients
+function CreateFire(coords, class, intensity, radius, source)
+    --[[
+        WICHTIGER KONZEPT: Server-Side Validation
+        WARUM? Clients sind NICHT vertrauenswürdig!
+        Ein modded Client könnte behaupten: "Spawn 1000 Feuer!"
+    ]]
+
+    -- Validierung: Ist der Spieler berechtigt?
+    if source and not HasPermission(source, 'admin') then
+        print(string.format("^1[Fire Module] Player %s tried to spawn fire without permission!^0", GetPlayerName(source)))
+        TriggerClientEvent('chat:addMessage', source, {
+            color = { 255, 0, 0 },
+            multiline = true,
+            args = { "System", "Du hast keine Berechtigung dafür!" }
+        })
+        return false
+    end
+
+    -- Validierung: Sind die Koordinaten gültig?
+    if not coords or type(coords) ~= "vector3" then
+        print("^1[Fire Module] ERROR: Invalid coordinates^0")
+        return false
+    end
+
+    -- Validierung: Existiert die Brandklasse?
+    if not Config.Fire.Classes[class] then
+        print(string.format("^3[Fire Module] WARNING: Unknown fire class '%s', using 'A'^0", class))
+        class = 'A'
+    end
+
+    -- Validierung: Performance-Limit
+    if #activeFires >= Config.Fire.MaxActiveFirePoints then
+        if source then
+            TriggerClientEvent('chat:addMessage', source, {
+                color = { 255, 100, 0 },
+                multiline = true,
+                args = { "System", string.format("Maximale Feueranzahl erreicht (%d)", Config.Fire.MaxActiveFirePoints) }
+            })
+        end
+        print("^3[Fire Module] WARNING: Max fire points reached!^0")
+        return false
+    end
+
+    -- ==========================================================================
+    -- FEUER ERSTELLEN
+    -- ==========================================================================
+
+    local fireId = fireIdCounter
+    fireIdCounter = fireIdCounter + 1 -- Nächste ID vorbereiten
+
+    -- Feuer-Datenstruktur
+    local fireData = {
+        id = fireId,
+        coords = coords,
+        class = class,
+        intensity = intensity or 1.0,
+        radius = radius or 2.0,
+        createdAt = os.time(),   -- Unix Timestamp
+        createdBy = source or 0, -- Wer hat es erstellt? (0 = System)
+        extinguished = false     -- Für Statistiken
+    }
+
+    -- In Server-Tabelle speichern
+    activeFires[fireId] = fireData
+
+    -- ==========================================================================
+    -- AN ALLE CLIENTS SENDEN
+    -- ==========================================================================
+    -- WICHTIG: -1 = ALL CLIENTS
+    -- WARUM nicht TriggerClientEvent für jeden Spieler einzeln?
+    -- Performance! -1 ist optimiert in der FiveM-Engine
+
+    TriggerClientEvent('firedept:client:createFire', -1, fireData)
+
+    if Config.Fire.Debug then
+        print(string.format(
+            "^2[Fire Module] Fire #%d created at %s (Class: %s, By: %s)^0",
+            fireId,
+            tostring(coords),
+            class,
+            source and GetPlayerName(source) or "System"
+        ))
+    end
+
+    -- Starte Ausbreitungs-Check für dieses Feuer
+    StartFireSpreadCheck(fireId)
+
+    return fireId -- Return ID für weitere Verarbeitung
+end
+
+-- Event registrieren
+RegisterNetEvent('firedept:server:createFire')
+AddEventHandler('firedept:server:createFire', function(coords, class, intensity, radius)
+    -- source = Der Spieler der das Event gesendet hat (automatisch von FiveM)
+    CreateFire(coords, class, intensity, radius, source)
+end)
+
+-- =============================================================================
+-- FIRE SPREADING - Das macht es interessant!
+-- =============================================================================
+
+function StartFireSpreadCheck(fireId)
+    --[[
+        KONZEPT: Ausbreitung
+        - Feuer sucht nach brennbaren Objekten in der Nähe
+        - Spawnt neue Feuer mit Wahrscheinlichkeit
+        - Realistisch: Wind, Material, Brandklasse beeinflussen es
+    ]]
+
+    Citizen.CreateThread(function()
+        while activeFires[fireId] and not activeFires[fireId].extinguished do
+            local fire = activeFires[fireId]
+            local classData = Config.Fire.Classes[fire.class]
+
+            -- WARUM Random? Feuer breitet sich nicht deterministisch aus
+            -- Würfel-Wurf: Breitet es sich aus?
+            local spreadChance = classData.spreadRate * 0.1 -- 10% pro SpreadRate
+
+            if math.random() < spreadChance then
+                -- Zufällige Richtung berechnen
+                local angle = math.random() * 2 * math.pi -- 0-360 Grad in Radians
+                local distance = math.random() * Config.Fire.SpreadDistance
+
+                -- VEKTOR-MATHEMATIK:
+                -- x = cos(winkel) * distanz
+                -- y = sin(winkel) * distanz
+                local newCoords = vector3(
+                    fire.coords.x + math.cos(angle) * distance,
+                    fire.coords.y + math.sin(angle) * distance,
+                    fire.coords.z -- Gleiche Höhe (vorerst, später: Terrain-Check)
+                )
+
+                -- Neues Feuer spawnen (rekursiv!)
+                CreateFire(newCoords, fire.class, fire.intensity * 0.8, fire.radius * 0.9, nil)
+            end
+
+            -- WARUM Config.Fire.SpreadCheckInterval?
+            -- Alle 2 Sekunden checken = Balance zwischen Realismus und Performance
+            Citizen.Wait(Config.Fire.SpreadCheckInterval)
+        end
+    end)
+end
+
+-- =============================================================================
+-- FIRE EXTINGUISHING
+-- =============================================================================
+
+function ExtinguishFire(fireId, source)
+    if not activeFires[fireId] then
+        if Config.Fire.Debug then
+            print(string.format("^3[Fire Module] Fire #%d doesn't exist or already extinguished^0", fireId))
+        end
+        return false
+    end
+
+    local fire = activeFires[fireId]
+    fire.extinguished = true
+    fire.extinguishedAt = os.time()
+    fire.extinguishedBy = source or 0
+
+    -- An alle Clients senden
+    TriggerClientEvent('firedept:client:extinguishFire', -1, fireId)
+
+    if Config.Fire.Debug then
+        print(string.format(
+            "^3[Fire Module] Fire #%d extinguished (By: %s)^0",
+            fireId,
+            source and GetPlayerName(source) or "System"
+        ))
+    end
+
+    -- Aus Active-Liste entfernen (aber in History für Statistiken behalten)
+    -- WARUM nicht komplett löschen? Analytics! Wir wollen wissen:
+    -- - Wie lange Feuer durchschnittlich brennen
+    -- - Welche Klassen am häufigsten sind
+    -- - Wer die meisten Feuer löscht (Leaderboard?)
+
+    return true
+end
+
+RegisterNetEvent('firedept:server:extinguishFire')
+AddEventHandler('firedept:server:extinguishFire', function(fireId)
+    ExtinguishFire(fireId, source)
+end)
+
+-- =============================================================================
+-- PROXIMITY-BASED EXTINGUISH (Für Gameplay)
+-- =============================================================================
+
+-- Client kann Server informieren: "Ich bin nah am Feuer mit Wasser-Tool"
+RegisterNetEvent('firedept:server:attemptExtinguish')
+AddEventHandler('firedept:server:attemptExtinguish', function(fireId, toolType)
+    local fire = activeFires[fireId]
+    if not fire then return end
+
+    local classData = Config.Fire.Classes[fire.class]
+
+    -- Validierung: Ist das Tool effektiv gegen diese Brandklasse?
+    local isEffective = false
+    for _, validTool in ipairs(classData.extinguishers) do
+        if validTool == toolType then
+            isEffective = true
+            break
+        end
+    end
+
+    if not isEffective then
+        -- Falsches Löschmittel! (z.B. Wasser auf Öl-Brand = macht es schlimmer!)
+        TriggerClientEvent('chat:addMessage', source, {
+            color = { 255, 100, 0 },
+            args = { "Feuerwehr", "Dieses Löschmittel ist NICHT effektiv gegen " .. classData.name .. "!" }
+        })
+
+        -- Optional: Feuer vergrößern als Strafe
+        if toolType == 'water' and fire.class == 'B' then
+            fire.intensity = math.min(fire.intensity * 1.2, 2.0)
+            fire.radius = math.min(fire.radius * 1.1, 10.0)
+            -- Update an Clients
+            TriggerClientEvent('firedept:client:updateFire', -1, fireId, fire)
+        end
+
+        return
+    end
+
+    -- ERFOLGREICH! Reduziere Feuer-Intensität
+    fire.intensity = fire.intensity - 0.1
+
+    if fire.intensity <= 0 then
+        -- Komplett gelöscht!
+        ExtinguishFire(fireId, source)
+
+        -- Belohnung? XP? Achievement?
+        TriggerClientEvent('chat:addMessage', source, {
+            color = { 0, 255, 0 },
+            args = { "Feuerwehr", "Feuer erfolgreich gelöscht! +50 XP" }
+        })
+    else
+        -- Update an Clients
+        TriggerClientEvent('firedept:client:updateFire', -1, fireId, fire)
+    end
+end)
+
+-- =============================================================================
+-- PERMISSION SYSTEM - Simpel aber effektiv
+-- =============================================================================
+
+-- WARUM ein eigenes System?
+-- Standalone = keine Abhängigkeit zu ESX/QBCore Permission-System
+function HasPermission(source, level)
+    --[[
+        Permission-Levels:
+        - 'user' = Normaler Spieler (default)
+        - 'firefighter' = Fire Department Member
+        - 'officer' = Officer (mehr Config-Zugriff)
+        - 'chief' = Fire Chief (fast alles)
+        - 'admin' = Server Admin (alles)
+    ]]
+
+    -- Cache-Check (Performance)
+    if playerPermissions[source] then
+        return CheckPermissionLevel(playerPermissions[source], level)
+    end
+
+    -- Erste Check: Ist Spieler FiveM Admin?
+    -- WICHTIG: Das ist der "Ace" System von FiveM
+    if IsPlayerAceAllowed(source, "command") then
+        playerPermissions[source] = 'admin'
+        return true
+    end
+
+    -- Fallback: Normaler User
+    playerPermissions[source] = 'user'
+    return CheckPermissionLevel('user', level)
+end
+
+function CheckPermissionLevel(playerLevel, requiredLevel)
+    -- Hierarchie-System
+    local hierarchy = {
+        user = 0,
+        firefighter = 1,
+        officer = 2,
+        chief = 3,
+        admin = 4
+    }
+
+    return (hierarchy[playerLevel] or 0) >= (hierarchy[requiredLevel] or 0)
+end
+
+-- Permissions zurücksetzen wenn Spieler disconnected
+AddEventHandler('playerDropped', function()
+    local _source = source
+    if playerPermissions[_source] then
+        playerPermissions[_source] = nil
+    end
+end)
+
+-- =============================================================================
+-- ADMIN COMMANDS
+-- =============================================================================
+
+-- COMMAND: /firespawn
+RegisterCommand('firespawn', function(source, args, rawCommand)
+    -- Permission-Check
+    if not HasPermission(source, 'admin') then
+        TriggerClientEvent('chat:addMessage', source, {
+            color = { 255, 0, 0 },
+            args = { "System", "Keine Berechtigung!" }
+        })
+        return
+    end
+
+    --[[
+        Usage: /firespawn [class] [intensity] [radius]
+        Beispiel: /firespawn B 1.5 5.0
+    ]]
+
+    local class = args[1] or 'A'
+    local intensity = tonumber(args[2]) or 1.0
+    local radius = tonumber(args[3]) or 2.0
+
+    -- Spieler-Position holen
+    local playerPed = GetPlayerPed(source)
+    local coords = GetEntityCoords(playerPed)
+
+    -- Vor dem Spieler spawnen (nicht auf ihm!)
+    local heading = GetEntityHeading(playerPed)
+    local forwardVector = vector3(
+        math.sin(math.rad(heading)) * 5.0, -- 5 Meter vor dem Spieler
+        math.cos(math.rad(heading)) * 5.0,
+        0.0
+    )
+
+    local spawnCoords = coords + forwardVector
+
+    local fireId = CreateFire(spawnCoords, class, intensity, radius, source)
+
+    if fireId then
+        TriggerClientEvent('chat:addMessage', source, {
+            color = { 255, 150, 0 },
+            args = { "Feuerwehr", string.format("Feuer #%d gespawnt (Klasse: %s)", fireId, class) }
+        })
+    end
+end, false)
+
+-- COMMAND: /fireextinguish [fireId]
+RegisterCommand('fireextinguish', function(source, args, rawCommand)
+    if not HasPermission(source, 'admin') then
+        return
+    end
+
+    local fireId = tonumber(args[1])
+
+    if not fireId then
+        -- Alle Feuer löschen
+        local count = 0
+        for id, _ in pairs(activeFires) do
+            ExtinguishFire(id, source)
+            count = count + 1
+        end
+
+        TriggerClientEvent('chat:addMessage', source, {
+            color = { 0, 255, 0 },
+            args = { "Feuerwehr", string.format("Alle Feuer gelöscht (%d)", count) }
+        })
+    else
+        -- Spezifisches Feuer löschen
+        if ExtinguishFire(fireId, source) then
+            TriggerClientEvent('chat:addMessage', source, {
+                color = { 0, 255, 0 },
+                args = { "Feuerwehr", string.format("Feuer #%d gelöscht", fireId) }
+            })
+        end
+    end
+end, false)
+
+-- COMMAND: /firelist
+RegisterCommand('firelist', function(source, args, rawCommand)
+    if not HasPermission(source, 'admin') then
+        return
+    end
+
+    local count = 0
+    for _, fire in pairs(activeFires) do
+        if not fire.extinguished then
+            count = count + 1
+            TriggerClientEvent('chat:addMessage', source, {
+                color = { 255, 150, 0 },
+                args = { "Fire #" .. fire.id, string.format(
+                    "Klasse: %s | Intensität: %.1f | Radius: %.1f",
+                    fire.class,
+                    fire.intensity,
+                    fire.radius
+                ) }
+            })
+        end
+    end
+
+    TriggerClientEvent('chat:addMessage', source, {
+        color = { 255, 255, 255 },
+        args = { "System", string.format("Aktive Feuer: %d / %d", count, Config.Fire.MaxActiveFirePoints) }
+    })
+end, false)
+
+-- =============================================================================
+-- PERSISTENCE - Speichern & Laden
+-- =============================================================================
+
+function SaveFires()
+    --[[
+        WARUM Persistenz?
+        - Server-Restart = Feuer bleiben erhalten
+        - Scenario: Großbrand über mehrere Tage RP
+    ]]
+
+    -- Konvertiere zu JSON
+    local fireData = json.encode(activeFires)
+
+    -- Speichere in Ressource-Ordner
+    -- ACHTUNG: Funktioniert nur wenn Ressource Schreibrechte hat!
+    SaveResourceFile(GetCurrentResourceName(), "data/fires.json", fireData, -1)
+
+    if Config.Fire.Debug then
+        print("^2[Fire Module] Fires saved to disk^0")
+    end
+end
+
+function LoadPersistedFires()
+    local fireData = LoadResourceFile(GetCurrentResourceName(), "data/fires.json")
+
+    if not fireData then
+        print("^3[Fire Module] No persisted fires found^0")
+        return
+    end
+
+    activeFires = json.decode(fireData)
+
+    -- Finde höchste ID (für Counter)
+    for id, _ in pairs(activeFires) do
+        if id >= fireIdCounter then
+            fireIdCounter = id + 1
+        end
+    end
+
+    -- Sende an alle verbundene Clients
+    for _, fire in pairs(activeFires) do
+        if not fire.extinguished then
+            TriggerClientEvent('firedept:client:createFire', -1, fire)
+            StartFireSpreadCheck(fire.id)
+        end
+    end
+
+    print(string.format("^2[Fire Module] Loaded %d persisted fires^0", #activeFires))
+end
+
+function StartAutoSave()
+    -- Alle 5 Minuten automatisch speichern
+    Citizen.CreateThread(function()
+        while true do
+            Citizen.Wait(300000) -- 5 Minuten
+            SaveFires()
+        end
+    end)
+end
+
+-- Beim Ressource-Stop speichern
+AddEventHandler('onResourceStop', function(resourceName)
+    if GetCurrentResourceName() == resourceName then
+        SaveFires()
+        print("^2[Fire Module] Shutdown complete - fires saved^0")
+    end
+end)
+
+-- =============================================================================
+-- DEBUGGING & ANALYTICS
+-- =============================================================================
+
+-- Admin-Command für Statistiken
+RegisterCommand('firestats', function(source, args, rawCommand)
+    if not HasPermission(source, 'admin') then
+        return
+    end
+
+    local totalFires = 0
+    local activeCount = 0
+    local extinguishedCount = 0
+    local classCounts = {}
+
+    for _, fire in pairs(activeFires) do
+        totalFires = totalFires + 1
+
+        if fire.extinguished then
+            extinguishedCount = extinguishedCount + 1
+        else
+            activeCount = activeCount + 1
+        end
+
+        classCounts[fire.class] = (classCounts[fire.class] or 0) + 1
+    end
+
+    TriggerClientEvent('chat:addMessage', source, {
+        color = { 255, 200, 0 },
+        multiline = true,
+        args = { "Fire Statistics", string.format(
+            "Total: %d | Active: %d | Gelöscht: %d\n" ..
+            "Klasse A: %d | Klasse B: %d | Klasse C: %d",
+            totalFires, activeCount, extinguishedCount,
+            classCounts['A'] or 0,
+            classCounts['B'] or 0,
+            classCounts['C'] or 0
+        ) }
+    })
+end, false)
+
+-- Admin-Command zum Debuggen
+RegisterCommand('firedebug', function(source, args, rawCommand)
+    Config.Fire.Debug = not Config.Fire.Debug
+    print(string.format("^2[Fire Module] Debugging %s^0", Config.Fire.Debug and "enabled" or "disabled"))
+end, false)
+
+-- Admin-Command zum Löschen
+RegisterCommand('fireclear', function(source, args, rawCommand)
+    activeFires = {}
+    print("^2[Fire Module] Fires cleared^0")
+end, false)
