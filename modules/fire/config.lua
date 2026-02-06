@@ -7,6 +7,9 @@ Config.Fire = {
     -- Modul-Status
     Enabled = true,
 
+    -- SPREADING CONTROL
+    EnableSpreading = false, -- <-- NEU: Spreading an/aus
+
     -- Debug-Modus (zeigt zusätzliche Infos)
     Debug = true,
 

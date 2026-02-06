@@ -292,6 +292,10 @@ end, false)
 
 function StartInteractionLoop()
     Citizen.CreateThread(function()
+        print("^2[Fire Module] Interaction Loop started^0")
+
+        local lastDebugPrint = 0
+
         while IsModuleActive('fire') do
             local playerPed = PlayerPedId()
             local playerCoords = GetEntityCoords(playerPed)
@@ -304,8 +308,19 @@ function StartInteractionLoop()
                 if distance < 5.0 then
                     nearFireWithExtinguisher = fireId
 
+                    -- DEBUG: Nur alle 2 Sekunden printen
+                    if Config.Fire.Debug then
+                        local now = GetGameTimer()
+                        if (now - lastDebugPrint) > 2000 then
+                            print(string.format("^2[DEBUG] Near fire #%d, distance: %.2fm^0", fireId, distance))
+                            lastDebugPrint = now
+                        end
+                    end
+
+                    -- 3D Text
                     DrawText3D(fire.coords + vector3(0, 0, 1.0), "~g~[E]~w~ Feuer löschen")
 
+                    -- Marker (mit korrigierten Parametern)
                     DrawMarker(
                         20,
                         fire.coords.x, fire.coords.y, fire.coords.z - 0.98,
@@ -313,7 +328,8 @@ function StartInteractionLoop()
                         0.0, 0.0, 0.0,
                         1.5, 1.5, 0.5,
                         255, 0, 0, 100,
-                        false, true, 2, false, "", "", false
+                        false, true, 2, false,
+                        nil, nil, false
                     )
                     break
                 end
@@ -321,6 +337,8 @@ function StartInteractionLoop()
 
             Citizen.Wait(0)
         end
+
+        print("^1[Fire Module] Interaction Loop stopped^0")
     end)
 end
 

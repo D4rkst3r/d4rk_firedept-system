@@ -13,6 +13,23 @@ local fireIdCounter = 1      -- Auto-Increment ID Generator
 local playerPermissions = {} -- { [source] = permissionLevel }
 
 -- =============================================================================
+-- UTILITY FUNCTIONS
+-- =============================================================================
+
+-- WARUM diese Funktion?
+-- #table funktioniert NICHT bei non-array Tables!
+-- Diese Funktion zählt ALLE Keys richtig
+function CountActiveFires()
+    local count = 0
+    for _, fire in pairs(activeFires) do
+        if not fire.extinguished then
+            count = count + 1
+        end
+    end
+    return count
+end
+
+-- =============================================================================
 -- INIT: Wird beim Ressource-Start aufgerufen
 -- =============================================================================
 
@@ -65,7 +82,7 @@ function CreateFire(coords, class, intensity, radius, source)
     end
 
     -- Validierung: Performance-Limit
-    if #activeFires >= Config.Fire.MaxActiveFirePoints then
+    if CountActiveFires() >= Config.Fire.MaxActiveFirePoints then
         if source then
             TriggerClientEvent('chat:addMessage', source, {
                 color = { 255, 100, 0 },
@@ -118,8 +135,10 @@ function CreateFire(coords, class, intensity, radius, source)
         ))
     end
 
-    -- Starte Ausbreitungs-Check für dieses Feuer
-    StartFireSpreadCheck(fireId)
+    -- Starte Ausbreitungs-Check für dieses Feuer (nur wenn enabled)
+    if Config.Fire.EnableSpreading then
+        StartFireSpreadCheck(fireId)
+    end
 
     return fireId -- Return ID für weitere Verarbeitung
 end
@@ -485,7 +504,7 @@ function LoadPersistedFires()
         end
     end
 
-    print(string.format("^2[Fire Module] Loaded %d persisted fires^0", #activeFires))
+    print(string.format("^2[Fire Module] Loaded %d persisted fires^0", CountActiveFires()))
 end
 
 function StartAutoSave()
