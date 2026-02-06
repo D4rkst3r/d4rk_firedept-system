@@ -31,5 +31,6 @@ server_scripts {
 client_scripts {
     'core/main.lua',
     'core/utils.lua',
-    'modules/fire/client.lua'
+    'modules/fire/client.lua',
+    'modules/equipment/client.lua'
 }

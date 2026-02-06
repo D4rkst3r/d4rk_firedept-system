@@ -413,7 +413,23 @@ RegisterKeyMapping('fd_extinguish', 'Fire: Feuer löschen', 'keyboard', 'E')
 
 RegisterCommand('fd_extinguish', function()
     if nearFireWithExtinguisher then
-        -- Animation abspielen
+        -- ✅ NEUE LOGIK: Check Equipment Module
+        if IsModuleActive('equipment') then
+            local hasTool = exports['d4rk_firedept-system']:HasTool()
+
+            if hasTool then
+                -- Nutze Equipment Module's UseTool Funktion
+                -- (Das Equipment Module handhabt Animation + Server-Call)
+                TriggerEvent('equipment:useTool', nearFireWithExtinguisher)
+                return
+            else
+                -- Kein Tool = Warnung
+                ClientUtils.Notify('warning', 'Du brauchst ein Tool zum Löschen!')
+                return
+            end
+        end
+
+        -- FALLBACK: Old System (wenn Equipment Module disabled)
         local playerPed = PlayerPedId()
         RequestAnimDict("weapons@first_person@aim_rng@generic@projectile@thermal_charge@")
         while not HasAnimDictLoaded("weapons@first_person@aim_rng@generic@projectile@thermal_charge@") do
@@ -462,8 +478,22 @@ function StartInteractionLoop()
                         end
                     end
 
+                    -- ✅ NEUE LOGIK: Check ob Equipment Module aktiv
+                    local text = "~g~[E]~w~ Feuer löschen"
+
+                    if IsModuleActive('equipment') then
+                        -- Check ob Tool equipped
+                        local hasTool = exports['d4rk_firedept-system']:HasTool()
+
+                        if hasTool then
+                            text = "~g~[E]~w~ Mit Tool löschen"
+                        else
+                            text = "~o~[E]~w~ Feuer löschen ~r~(kein Tool!)~w~"
+                        end
+                    end
+
                     -- 3D Text
-                    ClientUtils.DrawText3D(fire.coords + vector3(0, 0, 1.0), "~g~[E]~w~ Feuer löschen")
+                    ClientUtils.DrawText3D(fire.coords + vector3(0, 0, 1.0), text)
 
                     -- Marker
                     ClientUtils.DrawMarker(
