@@ -21,6 +21,7 @@ shared_scripts {
 server_scripts {
     'core/permissions.lua', -- Rechteverwaltung
     'core/storage.lua',
+    'core/error_handler.lua',
     'modules/fire/server.lua'
 }
 
