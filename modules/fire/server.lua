@@ -122,7 +122,7 @@ function CreateFire(coords, class, intensity, radius, source)
     -- WARUM nicht TriggerClientEvent für jeden Spieler einzeln?
     -- Performance! -1 ist optimiert in der FiveM-Engine
 
-    TriggerClientEvent('firedept:client:createFire', -1, fireData)
+    TriggerClientEvent(Events.Fire.Create, -1, fireData)
 
     if Config.Fire.Debug then
         print(string.format(
@@ -143,8 +143,8 @@ function CreateFire(coords, class, intensity, radius, source)
 end
 
 -- Event registrieren
-RegisterNetEvent('firedept:server:createFire')
-AddEventHandler('firedept:server:createFire', function(coords, class, intensity, radius)
+RegisterNetEvent(Events.Fire.RequestCreate)
+AddEventHandler(Events.Fire.RequestCreate, function(coords, class, intensity, radius)
     -- source = Der Spieler der das Event gesendet hat (automatisch von FiveM)
     CreateFire(coords, class, intensity, radius, source)
 end)
@@ -210,7 +210,7 @@ function ExtinguishFire(fireId, source)
     local fire = activeFires[fireId]
 
     -- An alle Clients senden
-    TriggerClientEvent('firedept:client:extinguishFire', -1, fireId)
+    TriggerClientEvent(Events.Fire.Extinguish, -1, fireId)
 
     if Config.Fire.Debug then
         print(string.format(
@@ -226,8 +226,8 @@ function ExtinguishFire(fireId, source)
     return true
 end
 
-RegisterNetEvent('firedept:server:extinguishFire')
-AddEventHandler('firedept:server:extinguishFire', function(fireId)
+RegisterNetEvent(Events.Fire.RequestExtinguish)
+AddEventHandler(Events.Fire.RequestExtinguish, function(fireId)
     ExtinguishFire(fireId, source)
 end)
 
@@ -236,8 +236,8 @@ end)
 -- =============================================================================
 
 -- Client kann Server informieren: "Ich bin nah am Feuer mit Wasser-Tool"
-RegisterNetEvent('firedept:server:attemptExtinguish')
-AddEventHandler('firedept:server:attemptExtinguish', function(fireId, toolType)
+RegisterNetEvent(Events.Fire.AttemptExtinguish)
+AddEventHandler(Events.Fire.AttemptExtinguish, function(fireId, toolType)
     local fire = activeFires[fireId]
     if not fire then return end
 
@@ -264,7 +264,7 @@ AddEventHandler('firedept:server:attemptExtinguish', function(fireId, toolType)
             fire.intensity = math.min(fire.intensity * 1.2, 2.0)
             fire.radius = math.min(fire.radius * 1.1, 10.0)
             -- Update an Clients
-            TriggerClientEvent('firedept:client:updateFire', -1, fireId, fire)
+            TriggerClientEvent(Events.Fire.Update, -1, fireId, fire)
         end
 
         return
@@ -276,15 +276,9 @@ AddEventHandler('firedept:server:attemptExtinguish', function(fireId, toolType)
     if fire.intensity <= 0 then
         -- Komplett gelöscht!
         ExtinguishFire(fireId, source)
-
-        -- Belohnung? XP? Achievement?
-        TriggerClientEvent('chat:addMessage', source, {
-            color = { 0, 255, 0 },
-            args = { "Fire", "Feuer erfolgreich gelöscht! +50 XP" }
-        })
     else
         -- Update an Clients
-        TriggerClientEvent('firedept:client:updateFire', -1, fireId, fire)
+        TriggerClientEvent(Events.Fire.Update, -1, fireId, fire)
     end
 end)
 
