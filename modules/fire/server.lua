@@ -282,6 +282,23 @@ AddEventHandler(Events.Fire.AttemptExtinguish, function(fireId, toolType)
     end
 end)
 
+
+-- =============================================================================
+-- STORAGE INTEGRATION
+-- =============================================================================
+
+-- Zähle total gespawnte Feuer
+local function IncrementFireCounter()
+    local current = Storage.GetModuleData('fire', 'total_fires_spawned', 0)
+    Storage.SetModuleData('fire', 'total_fires_spawned', current + 1)
+end
+
+-- In CreateFire() Funktion, NACH dem erfolgreichen Spawn:
+-- (Suche nach "return fireId" und füge DAVOR ein:)
+
+-- Statistik updaten
+IncrementFireCounter()
+
 -- =============================================================================
 -- ADMIN COMMANDS
 -- =============================================================================
