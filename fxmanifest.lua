@@ -14,15 +14,17 @@ shared_scripts {
     'config.lua',
     'shared/functions.lua',
     'shared/events.lua',
-    'modules/fire/config.lua' -- Fire Module Config laden
+    'modules/fire/config.lua',
+    'modules/equipment/config.lua'
 }
 
 -- Server-only Files
 server_scripts {
-    'core/permissions.lua', -- Rechteverwaltung
+    'core/permissions.lua',
     'core/storage.lua',
     'core/error_handler.lua',
-    'modules/fire/server.lua'
+    'modules/fire/server.lua',
+    'modules/equipment/server.lua'
 }
 
 -- Client-only Files
