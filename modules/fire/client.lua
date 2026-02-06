@@ -183,9 +183,26 @@ function StartFireLoop()
 
             local nearbyFires = {}
             local inSmokeZone = false
+            local closestDistance = 999999
+
+            -- OPTIMIZATION: Early-out wenn keine Feuer
+            if Utils.TableCount(activeFires) == 0 then
+                Citizen.Wait(5000) -- 5 Sekunden warten wenn keine Feuer
+                goto continue
+            end
 
             for fireId, fire in pairs(activeFires) do
                 local distance = #(playerCoords - fire.coords)
+
+                -- Track closest
+                if distance < closestDistance then
+                    closestDistance = distance
+                end
+
+                -- OPTIMIZATION: Skip wenn zu weit weg (>100m)
+                if distance > 100.0 then
+                    goto continue_fire
+                end
 
                 if distance < 50.0 then
                     table.insert(nearbyFires, { id = fireId, fire = fire, distance = distance })
@@ -198,15 +215,25 @@ function StartFireLoop()
                         ApplyFireDamage(playerPed, fire, distance)
                     end
                 end
+
+                ::continue_fire::
             end
 
             UpdateVisibility(inSmokeZone)
 
-            if #nearbyFires > 0 then
-                Citizen.Wait(100)
+            -- PERFORMANCE: Dynamisches Wait basierend auf closest fire
+            local waitTime
+            if closestDistance < 20.0 then
+                waitTime = 100  -- Nah = 100ms (10 FPS)
+            elseif closestDistance < 100.0 then
+                waitTime = 500  -- Mittlere Distanz = 500ms (2 FPS)
             else
-                Citizen.Wait(1000)
+                waitTime = 2000 -- Weit weg = 2 Sekunden
             end
+
+            Citizen.Wait(waitTime)
+
+            ::continue::
         end
     end)
 end
@@ -301,9 +328,15 @@ function StartInteractionLoop()
             local playerCoords = GetEntityCoords(playerPed)
 
             nearFireWithExtinguisher = nil
+            local closestDistance = 999999 -- Track closest fire
 
             for fireId, fire in pairs(activeFires) do
                 local distance = #(playerCoords - fire.coords)
+
+                -- Update closest distance
+                if distance < closestDistance then
+                    closestDistance = distance
+                end
 
                 if distance < 5.0 then
                     nearFireWithExtinguisher = fireId
@@ -320,7 +353,7 @@ function StartInteractionLoop()
                     -- 3D Text
                     ClientUtils.DrawText3D(fire.coords + vector3(0, 0, 1.0), "~g~[E]~w~ Feuer löschen")
 
-                    -- Marker (mit korrigierten Parametern)
+                    -- Marker
                     ClientUtils.DrawMarker(
                         fire.coords,
                         20,
@@ -331,7 +364,17 @@ function StartInteractionLoop()
                 end
             end
 
-            Citizen.Wait(0)
+            -- PERFORMANCE: Dynamisches Wait basierend auf Distanz
+            local waitTime
+            if closestDistance < 10.0 then
+                waitTime = 0   -- Sehr nah = jeden Frame (smooth)
+            elseif closestDistance < 50.0 then
+                waitTime = 100 -- Mittlere Distanz = alle 100ms
+            else
+                waitTime = 500 -- Weit weg = alle 500ms
+            end
+
+            Citizen.Wait(waitTime)
         end
 
         print("^1[Fire Module] Interaction Loop stopped^0")
