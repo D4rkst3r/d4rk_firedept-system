@@ -209,9 +209,6 @@ function ExtinguishFire(fireId, source)
     end
 
     local fire = activeFires[fireId]
-    fire.extinguished = true
-    fire.extinguishedAt = os.time()
-    fire.extinguishedBy = source or 0
 
     -- An alle Clients senden
     TriggerClientEvent('firedept:client:extinguishFire', -1, fireId)
@@ -224,11 +221,8 @@ function ExtinguishFire(fireId, source)
         ))
     end
 
-    -- Aus Active-Liste entfernen (aber in History für Statistiken behalten)
-    -- WARUM nicht komplett löschen? Analytics! Wir wollen wissen:
-    -- - Wie lange Feuer durchschnittlich brennen
-    -- - Welche Klassen am häufigsten sind
-    -- - Wer die meisten Feuer löscht (Leaderboard?)
+    -- KOMPLETT AUS MEMORY LÖSCHEN (nicht nur markieren)
+    activeFires[fireId] = nil
 
     return true
 end
@@ -457,25 +451,45 @@ RegisterCommand('firelist', function(source, args, rawCommand)
 end, false)
 
 -- =============================================================================
--- PERSISTENCE - Speichern & Laden
+-- PERSISTENCE - Speichern & Laden (KORRIGIERT)
 -- =============================================================================
 
 function SaveFires()
     --[[
-        WARUM Persistenz?
-        - Server-Restart = Feuer bleiben erhalten
-        - Scenario: Großbrand über mehrere Tage RP
+        WICHTIG: Nur AKTIVE Feuer speichern!
+        Gelöschte Feuer (extinguished = true) werden NICHT gespeichert
+        Das verhindert dass die JSON-Datei riesig wird
     ]]
 
+    -- Filtern: Nur aktive Feuer
+    local activeFiresToSave = {}
+    for fireId, fire in pairs(activeFires) do
+        if not fire.extinguished then
+            activeFiresToSave[fireId] = fire
+        end
+    end
+
     -- Konvertiere zu JSON
-    local fireData = json.encode(activeFires)
+    local fireData = json.encode(activeFiresToSave)
 
     -- Speichere in Ressource-Ordner
-    -- ACHTUNG: Funktioniert nur wenn Ressource Schreibrechte hat!
     SaveResourceFile(GetCurrentResourceName(), "data/fires.json", fireData, -1)
 
     if Config.Fire.Debug then
-        print("^2[Fire Module] Fires saved to disk^0")
+        local totalCount = 0
+        local savedCount = 0
+        for _, fire in pairs(activeFires) do
+            totalCount = totalCount + 1
+            if not fire.extinguished then
+                savedCount = savedCount + 1
+            end
+        end
+        print(string.format(
+            "^2[Fire Module] Saved %d active fires (total: %d, skipped: %d extinguished)^0",
+            savedCount,
+            totalCount,
+            totalCount - savedCount
+        ))
     end
 end
 
@@ -487,24 +501,32 @@ function LoadPersistedFires()
         return
     end
 
-    activeFires = json.decode(fireData)
+    local loadedFires = json.decode(fireData)
 
-    -- Finde höchste ID (für Counter)
-    for id, _ in pairs(activeFires) do
-        if id >= fireIdCounter then
-            fireIdCounter = id + 1
-        end
-    end
-
-    -- Sende an alle verbundene Clients
-    for _, fire in pairs(activeFires) do
+    -- WICHTIG: Nur aktive Feuer laden
+    local loadedCount = 0
+    for fireId, fire in pairs(loadedFires) do
         if not fire.extinguished then
+            activeFires[fireId] = fire
+
+            -- An alle verbundene Clients senden
             TriggerClientEvent('firedept:client:createFire', -1, fire)
-            StartFireSpreadCheck(fire.id)
+
+            -- Spreading (falls enabled)
+            if Config.Fire.EnableSpreading then
+                StartFireSpreadCheck(fire.id)
+            end
+
+            loadedCount = loadedCount + 1
+
+            -- FireIdCounter anpassen
+            if fire.id >= fireIdCounter then
+                fireIdCounter = fire.id + 1
+            end
         end
     end
 
-    print(string.format("^2[Fire Module] Loaded %d persisted fires^0", CountActiveFires()))
+    print(string.format("^2[Fire Module] Loaded %d persisted fires^0", loadedCount))
 end
 
 function StartAutoSave()
@@ -570,10 +592,4 @@ end, false)
 RegisterCommand('firedebug', function(source, args, rawCommand)
     Config.Fire.Debug = not Config.Fire.Debug
     print(string.format("^2[Fire Module] Debugging %s^0", Config.Fire.Debug and "enabled" or "disabled"))
-end, false)
-
--- Admin-Command zum Löschen
-RegisterCommand('fireclear', function(source, args, rawCommand)
-    activeFires = {}
-    print("^2[Fire Module] Fires cleared^0")
 end, false)
