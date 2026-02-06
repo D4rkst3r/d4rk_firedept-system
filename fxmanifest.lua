@@ -13,6 +13,7 @@ lua54 'yes'
 shared_scripts {
     'config.lua',
     'shared/functions.lua',
+    'shared/events.lua',
     'modules/fire/config.lua' -- Fire Module Config laden
 }
 

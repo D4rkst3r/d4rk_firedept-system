@@ -30,14 +30,14 @@ end)
 function StartFireModule()
     print("^2[Fire Module] Starting...^0")
 
-    RegisterNetEvent('firedept:client:createFire')
-    AddEventHandler('firedept:client:createFire', CreateFirePoint)
+    RegisterNetEvent(Events.Fire.Create)
+    AddEventHandler(Events.Fire.Create, CreateFirePoint)
 
-    RegisterNetEvent('firedept:client:extinguishFire')
-    AddEventHandler('firedept:client:extinguishFire', ExtinguishFirePoint)
+    RegisterNetEvent(Events.Fire.Extinguish)
+    AddEventHandler(Events.Fire.Extinguish, ExtinguishFirePoint)
 
-    RegisterNetEvent('firedept:client:updateFire')
-    AddEventHandler('firedept:client:updateFire', UpdateFirePoint)
+    RegisterNetEvent(Events.Fire.Update)
+    AddEventHandler(Events.Fire.Update, UpdateFirePoint)
 
     StartFireLoop()
     StartInteractionLoop()
@@ -285,7 +285,7 @@ RegisterCommand('fd_extinguish', function()
 
         -- Nach 3 Sekunden an Server senden
         Citizen.SetTimeout(3000, function()
-            TriggerServerEvent('firedept:server:attemptExtinguish', nearFireWithExtinguisher, 'water')
+            TriggerServerEvent(Events.Fire.AttemptExtinguish, nearFireWithExtinguisher, 'water')
         end)
     end
 end, false)
