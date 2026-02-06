@@ -95,6 +95,22 @@ function CreateFire(coords, class, intensity, radius, source)
         return false
     end
 
+    -- =============================================================================
+    -- STORAGE INTEGRATION
+    -- =============================================================================
+
+    -- Zähle total gespawnte Feuer
+    local function IncrementFireCounter()
+        local current = Storage.GetModuleData('fire', 'total_fires_spawned', 0)
+        Storage.SetModuleData('fire', 'total_fires_spawned', current + 1)
+    end
+
+    -- In CreateFire() Funktion, NACH dem erfolgreichen Spawn:
+    -- (Suche nach "return fireId" und füge DAVOR ein:)
+
+    -- Statistik updaten
+    IncrementFireCounter()
+
     -- ==========================================================================
     -- FEUER ERSTELLEN
     -- ==========================================================================
@@ -140,6 +156,7 @@ function CreateFire(coords, class, intensity, radius, source)
     if Config.Fire.EnableSpreading and not spreadManagerRunning then
         StartGlobalSpreadManager()
     end
+    IncrementFireCounter()
 
     return fireId -- Return ID für weitere Verarbeitung
 end
@@ -305,21 +322,7 @@ AddEventHandler(Events.Fire.AttemptExtinguish, function(fireId, toolType)
 end)
 
 
--- =============================================================================
--- STORAGE INTEGRATION
--- =============================================================================
 
--- Zähle total gespawnte Feuer
-local function IncrementFireCounter()
-    local current = Storage.GetModuleData('fire', 'total_fires_spawned', 0)
-    Storage.SetModuleData('fire', 'total_fires_spawned', current + 1)
-end
-
--- In CreateFire() Funktion, NACH dem erfolgreichen Spawn:
--- (Suche nach "return fireId" und füge DAVOR ein:)
-
--- Statistik updaten
-IncrementFireCounter()
 
 -- =============================================================================
 -- ADMIN COMMANDS
@@ -488,7 +491,7 @@ function LoadPersistedFires()
             activeFires[fireId] = fire
 
             -- An alle verbundene Clients senden
-            TriggerClientEvent('firedept:client:createFire', -1, fire)
+            TriggerClientEvent(Events.Fire.Create, -1, fire)
 
             -- Spreading (falls enabled)
             if Config.Fire.EnableSpreading and not spreadManagerRunning then
