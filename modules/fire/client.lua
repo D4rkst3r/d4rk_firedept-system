@@ -270,7 +270,7 @@ end
 -- INTERACTION SYSTEM
 -- =============================================================================
 
-RegisterKeyMapping('fd_extinguish', 'Feuerwehr: Feuer löschen', 'keyboard', 'E')
+RegisterKeyMapping('fd_extinguish', 'Fire: Feuer löschen', 'keyboard', 'E')
 
 RegisterCommand('fd_extinguish', function()
     if nearFireWithExtinguisher then

@@ -256,7 +256,7 @@ AddEventHandler('firedept:server:attemptExtinguish', function(fireId, toolType)
         -- Falsches Löschmittel! (z.B. Wasser auf Öl-Brand = macht es schlimmer!)
         TriggerClientEvent('chat:addMessage', source, {
             color = { 255, 100, 0 },
-            args = { "Feuerwehr", "Dieses Löschmittel ist NICHT effektiv gegen " .. classData.name .. "!" }
+            args = { "Fire", "Dieses Löschmittel ist NICHT effektiv gegen " .. classData.name .. "!" }
         })
 
         -- Optional: Feuer vergrößern als Strafe
@@ -280,7 +280,7 @@ AddEventHandler('firedept:server:attemptExtinguish', function(fireId, toolType)
         -- Belohnung? XP? Achievement?
         TriggerClientEvent('chat:addMessage', source, {
             color = { 0, 255, 0 },
-            args = { "Feuerwehr", "Feuer erfolgreich gelöscht! +50 XP" }
+            args = { "Fire", "Feuer erfolgreich gelöscht! +50 XP" }
         })
     else
         -- Update an Clients
@@ -331,7 +331,7 @@ RegisterCommand('firespawn', function(source, args, rawCommand)
     if fireId then
         TriggerClientEvent('chat:addMessage', source, {
             color = { 255, 150, 0 },
-            args = { "Feuerwehr", string.format("Feuer #%d gespawnt (Klasse: %s)", fireId, class) }
+            args = { "Fire", string.format("Feuer #%d gespawnt (Klasse: %s)", fireId, class) }
         })
     end
 end, false)
@@ -354,14 +354,14 @@ RegisterCommand('fireextinguish', function(source, args, rawCommand)
 
         TriggerClientEvent('chat:addMessage', source, {
             color = { 0, 255, 0 },
-            args = { "Feuerwehr", string.format("Alle Feuer gelöscht (%d)", count) }
+            args = { "Fire", string.format("Alle Feuer gelöscht (%d)", count) }
         })
     else
         -- Spezifisches Feuer löschen
         if ExtinguishFire(fireId, source) then
             TriggerClientEvent('chat:addMessage', source, {
                 color = { 0, 255, 0 },
-                args = { "Feuerwehr", string.format("Feuer #%d gelöscht", fireId) }
+                args = { "Fire", string.format("Feuer #%d gelöscht", fireId) }
             })
         end
     end
