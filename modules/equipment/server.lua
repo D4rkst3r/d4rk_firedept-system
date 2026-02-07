@@ -1,8 +1,10 @@
 -- =============================================================================
--- EQUIPMENT MODULE - SERVER SIDE
+-- EQUIPMENT MODULE - SERVER SIDE (WEAPON-BASED)
 -- =============================================================================
 
-local playerInventories = {} -- { [source] = { currentTool = nil, tools = {} } }
+-- Player Inventories
+-- { [source] = { weapons = {itemId = true}, lastUsed = timestamp } }
+local playerInventories = {}
 
 -- =============================================================================
 -- INIT
@@ -19,14 +21,13 @@ end)
 
 function GetPlayerInventory(source)
     --[[
-        Holt/Erstellt Spieler-Inventar
+        Holt oder erstellt Spieler-Inventar
     ]]
 
     if not playerInventories[source] then
         playerInventories[source] = {
-            currentTool = nil, -- Aktuell gehaltenes Tool
-            tools = {},        -- Verfügbare Tools { itemId = true }
-            lastUsed = 0       -- Cooldown-Tracking
+            weapons = {}, -- ✅ RICHTIG!
+            lastUsed = 0
         }
     end
 
@@ -34,59 +35,34 @@ function GetPlayerInventory(source)
 end
 
 function GiveEquipment(source, itemId)
-    --[[
-        Gibt Spieler ein Equipment-Item
-
-        BEISPIEL:
-        GiveEquipment(source, 'extinguisher_water')
-    ]]
-
-    return ErrorHandler.SafeCall(function()
-        -- Validierung
-        if not Config.Equipment.Items[itemId] then
-            ErrorHandler.Warning('Equipment', 'Invalid item ID', { itemId = itemId })
-            return false
-        end
-
-        local inventory = GetPlayerInventory(source)
-        local item = Config.Equipment.Items[itemId]
-
-        -- Check ob Spieler das Item schon hat
-        if inventory.tools[itemId] then
-            TriggerClientEvent('chat:addMessage', source, {
-                color = { 255, 200, 0 },
-                args = { "Equipment", "Du hast bereits: " .. item.name }
-            })
-            return false
-        end
-
-        -- Item hinzufügen
-        inventory.tools[itemId] = true
-
-        -- Client benachrichtigen
-        TriggerClientEvent(Events.Equipment.Give, source, itemId)
-
-        TriggerClientEvent('chat:addMessage', source, {
-            color = { 0, 255, 0 },
-            args = { "Equipment", "Erhalten: " .. item.name }
-        })
-
+    if not Config.Equipment.Items[itemId] then
         if Config.Equipment.Debug then
-            print(string.format(
-                "^2[Equipment] %s received: %s^0",
-                GetPlayerName(source),
-                item.name
-            ))
+            print(string.format("^1[Equipment] Invalid item: %s^0", tostring(itemId)))
         end
+        return false
+    end
 
-        return true
-    end, function(err)
-        ErrorHandler.Error('Equipment', 'Failed to give equipment', {
-            source = source,
-            itemId = itemId,
-            error = err
-        })
-    end)
+    local inventory = GetPlayerInventory(source)
+
+    -- ✅ FIX: inventory.weapons statt inventory.tools!
+    if inventory.weapons[itemId] then
+        if Config.Equipment.Debug then
+            print(string.format("^3[Equipment] %s already has %s^0", GetPlayerName(source), itemId))
+        end
+        return false
+    end
+
+    -- ✅ FIX: inventory.weapons!
+    inventory.weapons[itemId] = true
+
+    -- Client benachrichtigen
+    TriggerClientEvent(Events.Equipment.Give, source, itemId)
+
+    if Config.Equipment.Debug then
+        print(string.format("^2[Equipment] Given %s to %s^0", itemId, GetPlayerName(source)))
+    end
+
+    return true
 end
 
 function RemoveEquipment(source, itemId)
@@ -94,71 +70,43 @@ function RemoveEquipment(source, itemId)
         Entfernt Equipment von Spieler
     ]]
 
-    return ErrorHandler.SafeCall(function()
-        local inventory = GetPlayerInventory(source)
+    local inventory = GetPlayerInventory(source)
 
-        if not inventory.tools[itemId] then
-            return false
-        end
-
-        -- Wenn aktuell gehalten, erst ablegen
-        if inventory.currentTool == itemId then
-            inventory.currentTool = nil
-            TriggerClientEvent(Events.Equipment.Remove, source, itemId)
-        end
-
-        inventory.tools[itemId] = nil
-
-        TriggerClientEvent('chat:addMessage', source, {
-            color = { 255, 100, 0 },
-            args = { "Equipment", "Entfernt: " .. Config.Equipment.Items[itemId].name }
-        })
-
-        return true
-    end, function(err)
-        ErrorHandler.Error('Equipment', 'Failed to remove equipment', { error = err })
-    end)
-end
-
-function EquipTool(source, itemId)
-    --[[
-        Spieler nimmt Tool in die Hand
-    ]]
-
-    return ErrorHandler.SafeCall(function()
-        local inventory = GetPlayerInventory(source)
-
-        -- Check ob Spieler das Tool hat
-        if not inventory.tools[itemId] then
-            TriggerClientEvent('chat:addMessage', source, {
-                color = { 255, 0, 0 },
-                args = { "Equipment", "Du hast dieses Tool nicht!" }
-            })
-            return false
-        end
-
-        -- Altes Tool ablegen falls vorhanden
-        if inventory.currentTool then
-            TriggerClientEvent(Events.Equipment.Remove, source, inventory.currentTool)
-        end
-
-        -- Neues Tool equippen
-        inventory.currentTool = itemId
-
-        TriggerClientEvent(Events.Equipment.Use, source, itemId)
-
+    if not inventory.weapons[itemId] then
         if Config.Equipment.Debug then
             print(string.format(
-                "^2[Equipment] %s equipped: %s^0",
+                "^3[Equipment] Player %s doesn't have %s^0",
                 GetPlayerName(source),
-                Config.Equipment.Items[itemId].name
+                itemId
             ))
         end
+        return false
+    end
 
-        return true
-    end, function(err)
-        ErrorHandler.Error('Equipment', 'Failed to equip tool', { error = err })
-    end)
+    -- Item entfernen
+    inventory.weapons[itemId] = nil
+
+    -- Client benachrichtigen
+    TriggerClientEvent(Events.Equipment.Remove, source, itemId)
+
+    if Config.Equipment.Debug then
+        print(string.format(
+            "^3[Equipment] Removed %s from %s^0",
+            itemId,
+            GetPlayerName(source)
+        ))
+    end
+
+    return true
+end
+
+function HasEquipment(source, itemId)
+    --[[
+        Check ob Spieler Equipment hat
+    ]]
+
+    local inventory = GetPlayerInventory(source)
+    return inventory.weapons[itemId] == true
 end
 
 -- =============================================================================
@@ -167,17 +115,13 @@ end
 
 RegisterNetEvent(Events.Equipment.RequestGive)
 AddEventHandler(Events.Equipment.RequestGive, function(itemId)
-    GiveEquipment(source, itemId)
+    -- Für später: Permission-Check
+    -- Aktuell nur via Admin-Command
 end)
 
 RegisterNetEvent(Events.Equipment.RequestRemove)
 AddEventHandler(Events.Equipment.RequestRemove, function(itemId)
     RemoveEquipment(source, itemId)
-end)
-
-RegisterNetEvent(Events.Equipment.RequestUse)
-AddEventHandler(Events.Equipment.RequestUse, function(itemId)
-    EquipTool(source, itemId)
 end)
 
 -- =============================================================================
@@ -186,8 +130,19 @@ end)
 
 AddEventHandler('playerDropped', function(reason)
     local source = source
+
     if playerInventories[source] then
+        -- Optional: Inventar in DB speichern
+        -- Storage.SetPlayerData(source, 'equipment_inventory', playerInventories[source])
+
         playerInventories[source] = nil
+
+        if Config.Equipment.Debug then
+            print(string.format(
+                "^3[Equipment] Cleaned inventory for %s (disconnected)^0",
+                GetPlayerName(source)
+            ))
+        end
     end
 end)
 
@@ -195,6 +150,7 @@ end)
 -- ADMIN COMMANDS
 -- =============================================================================
 
+-- /giveequip [itemId] - Equipment geben
 RegisterCommand('giveequip', function(source, args, rawCommand)
     if not Permissions.HasPermission(source, 'admin') then
         TriggerClientEvent('chat:addMessage', source, {
@@ -204,70 +160,123 @@ RegisterCommand('giveequip', function(source, args, rawCommand)
         return
     end
 
-    --[[
-        Usage: /giveequip [itemId]
-        Beispiel: /giveequip extinguisher_water
-    ]]
-
     local itemId = args[1]
 
     if not itemId then
         TriggerClientEvent('chat:addMessage', source, {
-            color = { 255, 200, 0 },
+            color = { 255, 100, 0 },
             multiline = true,
-            args = { "Equipment",
-                "Verfügbare Items:\n" ..
-                "- extinguisher_water (Wasser)\n" ..
-                "- extinguisher_foam (Schaum)\n" ..
-                "- extinguisher_co2 (CO2)\n" ..
-                "- extinguisher_powder (Pulver)\n" ..
-                "- fire_axe (Axt)"
+            args = { "Usage", "/giveequip [itemId]\n\nAvailable:\n" ..
+            "extinguisher_water\nextinguisher_foam\nextinguisher_co2\n" ..
+            "extinguisher_powder\nfire_axe"
             }
         })
         return
     end
 
-    GiveEquipment(source, itemId)
+    if GiveEquipment(source, itemId) then
+        local item = Config.Equipment.Items[itemId]
+        TriggerClientEvent('chat:addMessage', source, {
+            color = { 0, 255, 0 },
+            args = { "Equipment", "Erhalten: " .. item.name }
+        })
+    else
+        TriggerClientEvent('chat:addMessage', source, {
+            color = { 255, 0, 0 },
+            args = { "Equipment", "Invalid item or already owned!" }
+        })
+    end
 end, false)
 
+-- /equiplist - Inventar anzeigen
 RegisterCommand('equiplist', function(source, args, rawCommand)
     local inventory = GetPlayerInventory(source)
 
     local count = 0
-    TriggerClientEvent('chat:addMessage', source, {
-        color = { 255, 200, 0 },
-        args = { "Inventar", "Deine Equipment:" }
-    })
-
-    for itemId, _ in pairs(inventory.tools) do
-        local item = Config.Equipment.Items[itemId]
-        local equipped = inventory.currentTool == itemId and " [EQUIPPED]" or ""
-
-        TriggerClientEvent('chat:addMessage', source, {
-            color = { 200, 200, 200 },
-            args = { "  ", item.name .. equipped }
-        })
+    for _, _ in pairs(inventory.weapons) do
         count = count + 1
     end
 
     if count == 0 then
         TriggerClientEvent('chat:addMessage', source, {
-            color = { 200, 200, 200 },
-            args = { "  ", "Keine Items" }
-        })
-    end
-end, false)
-
-RegisterCommand('usetool', function(source, args, rawCommand)
-    local itemId = args[1]
-
-    if not itemId then
-        TriggerClientEvent('chat:addMessage', source, {
             color = { 255, 200, 0 },
-            args = { "Usage", "/usetool [itemId]" }
+            args = { "Equipment", "Dein Inventar ist leer!" }
         })
         return
     end
 
-    EquipTool(source, itemId)
+    TriggerClientEvent('chat:addMessage', source, {
+        color = { 255, 200, 0 },
+        args = { "Equipment", string.format("Dein Inventar (%d Items):", count) }
+    })
+
+    for itemId, _ in pairs(inventory.weapons) do
+        local item = Config.Equipment.Items[itemId]
+
+        if item and item.weapon then
+            local weaponData = EquipmentWeapons[item.weapon]
+
+            if weaponData then
+                TriggerClientEvent('chat:addMessage', source, {
+                    color = { 200, 200, 200 },
+                    args = { "  ", string.format("- %s (Tint: %d)", weaponData.label, weaponData.tint or 0) }
+                })
+            end
+        end
+    end
 end, false)
+
+-- /removeequip [itemId] - Equipment entfernen
+RegisterCommand('removeequip', function(source, args, rawCommand)
+    if not Permissions.HasPermission(source, 'admin') then
+        return
+    end
+
+    local itemId = args[1]
+
+    if not itemId then
+        TriggerClientEvent('chat:addMessage', source, {
+            color = { 255, 100, 0 },
+            args = { "Usage", "/removeequip [itemId]" }
+        })
+        return
+    end
+
+    if RemoveEquipment(source, itemId) then
+        TriggerClientEvent('chat:addMessage', source, {
+            color = { 255, 200, 0 },
+            args = { "Equipment", "Item entfernt!" }
+        })
+    end
+end, false)
+
+-- /clearequip - Alles entfernen
+RegisterCommand('clearequip', function(source, args, rawCommand)
+    if not Permissions.HasPermission(source, 'admin') then
+        return
+    end
+
+    local inventory = GetPlayerInventory(source)
+
+    local count = 0
+    for itemId, _ in pairs(inventory.weapons) do
+        RemoveEquipment(source, itemId)
+        count = count + 1
+    end
+
+    TriggerClientEvent('chat:addMessage', source, {
+        color = { 0, 255, 0 },
+        args = { "Equipment", string.format("Inventar geleert! (%d Items entfernt)", count) }
+    })
+end, false)
+
+-- =============================================================================
+-- EXPORTS
+-- =============================================================================
+
+exports('GiveEquipment', GiveEquipment)
+exports('RemoveEquipment', RemoveEquipment)
+exports('HasEquipment', HasEquipment)
+exports('GetPlayerInventory', GetPlayerInventory)
+
+print("^2[Equipment Server] Loaded (Weapon-Based)^0")

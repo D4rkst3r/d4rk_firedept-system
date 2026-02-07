@@ -15,6 +15,7 @@ shared_scripts {
     'shared/functions.lua',
     'shared/events.lua',
     'modules/fire/config.lua',
+    'modules/equipment/weapons.lua',
     'modules/equipment/config.lua'
 }
 

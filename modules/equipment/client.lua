@@ -1,12 +1,9 @@
 -- =============================================================================
--- EQUIPMENT MODULE - CLIENT SIDE
+-- EQUIPMENT MODULE - CLIENT SIDE (WEAPON-BASED WITH TINTS)
 -- =============================================================================
 
 local playerInventory = {
-    currentTool = nil,  -- Aktuell gehaltenes Tool
-    tools = {},         -- Verfügbare Tools
-    currentProp = nil,  -- Aktuelles Prop-Entity
-    isAnimating = false -- Blockiert während Animation
+    weapons = {} -- { [weaponHash] = itemId }
 }
 
 -- =============================================================================
@@ -39,26 +36,19 @@ function StartEquipmentModule()
     RegisterNetEvent(Events.Equipment.Remove)
     AddEventHandler(Events.Equipment.Remove, OnEquipmentRemoved)
 
-    RegisterNetEvent(Events.Equipment.Use)
-    AddEventHandler(Events.Equipment.Use, OnEquipmentUsed)
-
     print("^2[Equipment Module] Started!^0")
 end
 
 function StopEquipmentModule()
     print("^3[Equipment Module] Stopping...^0")
 
-    -- Cleanup: Prop entfernen
-    if playerInventory.currentProp then
-        RemoveProp()
+    -- Cleanup: Alle Weapons entfernen
+    local playerPed = PlayerPedId()
+    for weaponHash, _ in pairs(playerInventory.weapons) do
+        RemoveWeaponFromPed(playerPed, weaponHash)
     end
 
-    playerInventory = {
-        currentTool = nil,
-        tools = {},
-        currentProp = nil,
-        isAnimating = false
-    }
+    playerInventory.weapons = {}
 end
 
 -- =============================================================================
@@ -67,191 +57,77 @@ end
 
 function OnEquipmentGiven(itemId)
     --[[
-        Server hat uns ein Item gegeben
+        Server hat uns ein Weapon gegeben
     ]]
 
     if not Config.Equipment.Items[itemId] then
-        print(string.format("^1[Equipment] ERROR: Received invalid item: %s^0", tostring(itemId)))
+        print(string.format("^1[Equipment] ERROR: Invalid item: %s^0", tostring(itemId)))
         return
     end
 
-    playerInventory.tools[itemId] = true
-
     local item = Config.Equipment.Items[itemId]
-    ClientUtils.Notify('success', "Erhalten: " .. item.name)
+    local weaponData = EquipmentWeapons[item.weapon]
 
-    if Config.Equipment.Debug then
-        print(string.format("^2[Equipment] Received: %s^0", item.name))
-    end
-end
-
-function OnEquipmentRemoved(itemId)
-    --[[
-        Server hat ein Item entfernt
-    ]]
-
-    -- Wenn gerade gehalten, ablegen
-    if playerInventory.currentTool == itemId then
-        RemoveProp()
-        playerInventory.currentTool = nil
-    end
-
-    playerInventory.tools[itemId] = nil
-
-    local item = Config.Equipment.Items[itemId]
-    if item then
-        ClientUtils.Notify('warning', "Entfernt: " .. item.name)
-    end
-end
-
-function OnEquipmentUsed(itemId)
-    --[[
-        Server sagt: Equip dieses Tool!
-    ]]
-
-    if not Config.Equipment.Items[itemId] then
-        print(string.format("^1[Equipment] ERROR: Cannot use invalid item: %s^0", tostring(itemId)))
-        return
-    end
-
-    -- Altes Tool ablegen
-    if playerInventory.currentTool then
-        RemoveProp()
-    end
-
-    -- Neues Tool equippen
-    playerInventory.currentTool = itemId
-    SpawnProp(itemId)
-
-    local item = Config.Equipment.Items[itemId]
-    ClientUtils.Notify('info', "Equipped: " .. item.name)
-
-    if Config.Equipment.Debug then
-        print(string.format("^2[Equipment] Equipped: %s^0", item.name))
-    end
-end
-
--- =============================================================================
--- PROP MANAGEMENT
--- =============================================================================
-
-function SpawnProp(itemId)
-    --[[
-        Spawnt Prop und attacht es an Spieler
-
-        WARUM kompliziert?
-        - Prop muss geladen werden (RequestModel)
-        - Muss am richtigen Knochen befestigt werden
-        - Position/Rotation muss stimmen
-    ]]
-
-    local item = Config.Equipment.Items[itemId]
-    if not item then
-        print(string.format("^1[Equipment] ERROR: Invalid item ID: %s^0", tostring(itemId)))
+    if not weaponData then
+        print(string.format("^1[Equipment] ERROR: Invalid weapon: %s^0", tostring(item.weapon)))
         return
     end
 
     local playerPed = PlayerPedId()
 
-    -- =========================================================================
-    -- PROP MODEL LADEN
-    -- =========================================================================
+    -- ✅ WEAPON GEBEN
+    GiveWeaponToPed(
+        playerPed,
+        weaponData.hash,
+        weaponData.ammo or 100,
+        false, -- Hidden
+        true   -- Equip now
+    )
 
-    local propModel = item.propHash or GetHashKey(item.prop)
+    -- ✅ TINT SETZEN (um verschiedene Typen zu unterscheiden)
+    if weaponData.tint then
+        SetPedWeaponTintIndex(playerPed, weaponData.hash, weaponData.tint)
 
-    RequestModel(propModel)
-    local timeout = 0
-    while not HasModelLoaded(propModel) do
-        Citizen.Wait(10)
-        timeout = timeout + 10
-
-        -- Timeout nach 5 Sekunden
-        if timeout > 5000 then
-            print(string.format(
-                "^1[Equipment] ERROR: Failed to load prop model: %s (timeout)^0",
-                item.prop
-            ))
-            return
+        if Config.Equipment.Debug then
+            print(string.format("^2[Equipment] Set tint %d for %s^0", weaponData.tint, weaponData.label))
         end
     end
 
-    -- =========================================================================
-    -- PROP ERSTELLEN
-    -- =========================================================================
+    -- Merken dass wir diese Waffe haben (mit itemId, nicht Hash!)
+    -- WICHTIG: Mehrere Items können gleiche Weapon haben (unterschiedliche Tints)
+    playerInventory.weapons[weaponData.hash] = itemId
 
-    local coords = GetEntityCoords(playerPed)
-    local prop = CreateObject(propModel, coords.x, coords.y, coords.z, true, true, true)
-
-    if not prop or prop == 0 then
-        print(string.format("^1[Equipment] ERROR: Failed to create prop for: %s^0", item.name))
-        SetModelAsNoLongerNeeded(propModel)
-        return
-    end
-
-    -- =========================================================================
-    -- PROP ATTACHEN
-    -- =========================================================================
-
-    --[[
-        WICHTIG: AttachEntityToEntity Parameter
-
-        1. entity1 = Das Prop
-        2. entity2 = Der Spieler (Ped)
-        3. boneIndex = Welcher Knochen? (28422 = Rechte Hand)
-        4-6. xPos, yPos, zPos = Position-Offset
-        7-9. xRot, yRot, zRot = Rotation
-        10. p9 = Unknown (false)
-        11. useSoftPinning = false
-        12. collision = false (kein Collision)
-        13. isPed = true
-        14. vertexIndex = 0
-        15. fixedRot = true (Rotation fixiert)
-    ]]
-
-    AttachEntityToEntity(
-        prop,
-        playerPed,
-        GetPedBoneIndex(playerPed, item.bone),
-        item.offset.x, item.offset.y, item.offset.z,
-        item.rotation.x, item.rotation.y, item.rotation.z,
-        false, false, false, true, 0, true
-    )
-
-    -- Prop-Handle speichern
-    playerInventory.currentProp = prop
-
-    -- Model kann jetzt freigegeben werden (Prop existiert bereits)
-    SetModelAsNoLongerNeeded(propModel)
+    ClientUtils.Notify('success', "Erhalten: " .. weaponData.label)
 
     if Config.Equipment.Debug then
-        print(string.format(
-            "^2[Equipment] Prop spawned and attached: %s (Entity: %d)^0",
-            item.name,
-            prop
+        print(string.format("^2[Equipment] Given weapon: %s (Hash: %s, Tint: %s)^0",
+            weaponData.label,
+            weaponData.hash,
+            tostring(weaponData.tint)
         ))
     end
 end
 
-function RemoveProp()
+function OnEquipmentRemoved(itemId)
     --[[
-        Entfernt aktuelles Prop
+        Server hat Weapon entfernt
     ]]
 
-    if playerInventory.currentProp then
-        local prop = playerInventory.currentProp
+    local item = Config.Equipment.Items[itemId]
+    if not item then return end
 
-        -- Detach first (wichtig!)
-        DetachEntity(prop, true, true)
+    local weaponData = EquipmentWeapons[item.weapon]
+    if not weaponData then return end
 
-        -- Delete
-        DeleteEntity(prop)
+    local playerPed = PlayerPedId()
 
-        playerInventory.currentProp = nil
+    -- ✅ WEAPON ENTFERNEN
+    RemoveWeaponFromPed(playerPed, weaponData.hash)
 
-        if Config.Equipment.Debug then
-            print("^3[Equipment] Prop removed^0")
-        end
-    end
+    -- Aus Inventar entfernen
+    playerInventory.weapons[weaponData.hash] = nil
+
+    ClientUtils.Notify('warning', "Entfernt: " .. weaponData.label)
 end
 
 -- =============================================================================
@@ -260,137 +136,93 @@ end
 
 function UseTool(fireId)
     --[[
-        Benutzt aktuelles Tool zum Löschen
-
-        FLOW:
-        1. Check ob Tool equipped
-        2. Check Cooldown
-        3. Spiele Animation
-        4. Sende an Server mit Tool-Info
+        Benutzt aktuelles Weapon zum Löschen
+        GTA V handled Animation automatisch!
     ]]
 
-    -- Check ob Tool equipped
-    if not playerInventory.currentTool then
-        ClientUtils.Notify('error', 'Kein Tool equipped!')
+    local playerPed = PlayerPedId()
+
+    -- ✅ CHECK WELCHE WEAPON EQUIPPED
+    local currentWeapon = GetSelectedPedWeapon(playerPed)
+
+    -- Check ob es ein Equipment-Weapon ist
+    local itemId = playerInventory.weapons[currentWeapon]
+
+    if not itemId then
+        ClientUtils.Notify('error', 'Kein Tool equipped! (Waffenrad öffnen mit TAB)')
         return false
     end
 
-    -- Check ob gerade Animation läuft
-    if playerInventory.isAnimating then
-        return false
-    end
+    local item = Config.Equipment.Items[itemId]
+    local weaponData = EquipmentWeapons[item.weapon]
 
-    local item = Config.Equipment.Items[playerInventory.currentTool]
-    if not item then
-        print(string.format("^1[Equipment] ERROR: Invalid tool: %s^0", tostring(playerInventory.currentTool)))
-        return false
-    end
-
-    -- Animation starten
-    playerInventory.isAnimating = true
-
-    ClientUtils.PlayAnimation(
-        item.animDict,
-        item.animName,
-        item.animDuration,
-        16 -- Flag: Cancelable
-    )
-
-    -- Sound abspielen (optional)
+    -- Sound abspielen
     PlaySoundFrontend(-1, "PICKUP_WEAPON_BALL", "HUD_FRONTEND_WEAPONS_PICKUPS_SOUNDSET", true)
 
-    -- Nach Animation-Dauer: An Server senden
-    Citizen.SetTimeout(item.animDuration, function()
-        playerInventory.isAnimating = false
+    -- An Server senden
+    TriggerServerEvent(Events.Fire.AttemptExtinguish, fireId, itemId)
 
-        -- An Server senden mit Tool-Type
-        TriggerServerEvent(Events.Fire.AttemptExtinguish, fireId, playerInventory.currentTool)
+    ClientUtils.Notify('info', string.format("Benutze %s...", weaponData.label))
 
-        if Config.Equipment.Debug then
-            print(string.format(
-                "^2[Equipment] Used %s on fire #%d^0",
-                item.name,
-                fireId
-            ))
-        end
-    end)
+    if Config.Equipment.Debug then
+        print(string.format(
+            "^2[Equipment] Used %s on fire #%d^0",
+            weaponData.label,
+            fireId
+        ))
+    end
 
     return true
 end
 
 -- =============================================================================
--- KEY BINDINGS
--- =============================================================================
-
---[[
-    KEY BINDINGS:
-    - E = Feuer löschen (wenn nah genug)
-    - Z = Tool-Menü öffnen (später)
-    - X = Tool ablegen
-]]
-
--- Tool ablegen
-RegisterKeyMapping('fd_droptool', 'Equipment: Tool ablegen', 'keyboard', 'X')
-
-RegisterCommand('fd_droptool', function()
-    if playerInventory.currentTool then
-        RemoveProp()
-
-        local item = Config.Equipment.Items[playerInventory.currentTool]
-        ClientUtils.Notify('info', item.name .. " abgelegt")
-
-        playerInventory.currentTool = nil
-    end
-end, false)
-
--- =============================================================================
--- CLEANUP ON DEATH/ARREST/etc
--- =============================================================================
-
-Citizen.CreateThread(function()
-    while true do
-        Citizen.Wait(1000)
-
-        if IsModuleActive('equipment') then
-            local playerPed = PlayerPedId()
-
-            -- Check ob Spieler tot ist
-            if IsEntityDead(playerPed) then
-                if playerInventory.currentProp then
-                    RemoveProp()
-                    playerInventory.currentTool = nil
-                end
-            end
-
-            -- Check ob Prop noch existiert
-            if playerInventory.currentProp then
-                if not DoesEntityExist(playerInventory.currentProp) then
-                    -- Prop wurde irgendwie gelöscht, neu spawnen
-                    if playerInventory.currentTool then
-                        SpawnProp(playerInventory.currentTool)
-                    end
-                end
-            end
-        end
-    end
-end)
-
--- =============================================================================
--- EXPORTS (für Fire Module)
+-- HELPERS
 -- =============================================================================
 
 function GetCurrentTool()
-    return playerInventory.currentTool
+    --[[
+        Gibt aktuelles Equipment zurück (für Fire Module)
+    ]]
+
+    local playerPed = PlayerPedId()
+    local currentWeapon = GetSelectedPedWeapon(playerPed)
+
+    return playerInventory.weapons[currentWeapon]
 end
 
 function HasTool()
-    return playerInventory.currentTool ~= nil
+    --[[
+        Check ob irgendein Equipment equipped
+    ]]
+
+    local playerPed = PlayerPedId()
+    local currentWeapon = GetSelectedPedWeapon(playerPed)
+
+    return playerInventory.weapons[currentWeapon] ~= nil
 end
 
-exports('GetCurrentTool', GetCurrentTool)
-exports('HasTool', HasTool)
+function GetInventory()
+    --[[
+        Gibt komplettes Inventar zurück
+        Für UI/Menu später
+    ]]
 
+    local inventory = {}
 
+    for weaponHash, itemId in pairs(playerInventory.weapons) do
+        local item = Config.Equipment.Items[itemId]
+        local weaponData = EquipmentWeapons[item.weapon]
+
+        table.insert(inventory, {
+            itemId = itemId,
+            weaponHash = weaponHash,
+            weaponData = weaponData,
+            ammo = GetAmmoInPedWeapon(PlayerPedId(), weaponHash)
+        })
+    end
+
+    return inventory
+end
 
 -- =============================================================================
 -- INTERNAL EVENTS
@@ -400,3 +232,93 @@ RegisterNetEvent('equipment:useTool')
 AddEventHandler('equipment:useTool', function(fireId)
     UseTool(fireId)
 end)
+
+-- =============================================================================
+-- COMMANDS (für Testing)
+-- =============================================================================
+
+RegisterCommand('equipinfo', function()
+    local playerPed = PlayerPedId()
+    local currentWeapon = GetSelectedPedWeapon(playerPed)
+
+    print("^3========== EQUIPMENT INFO ==========^0")
+    print(string.format("^3Current Weapon Hash: %s^0", currentWeapon))
+
+    local itemId = playerInventory.weapons[currentWeapon]
+    if itemId then
+        local item = Config.Equipment.Items[itemId]
+        local weaponData = EquipmentWeapons[item.weapon]
+
+        print(string.format("^2Equipped: %s^0", weaponData.label))
+        print(string.format("^2Tint: %s^0", weaponData.tint))
+        print(string.format("^2Ammo: %d / %d^0",
+            GetAmmoInPedWeapon(playerPed, currentWeapon),
+            weaponData.ammo
+        ))
+        print("^2Effectiveness:^0")
+        for class, eff in pairs(weaponData.effectiveness) do
+            print(string.format("  ^3%s: %.1f%%^0", class, eff * 100))
+        end
+    else
+        print("^1No equipment weapon equipped^0")
+    end
+
+    print("^3Inventory:^0")
+    for weaponHash, id in pairs(playerInventory.weapons) do
+        local i = Config.Equipment.Items[id]
+        local w = EquipmentWeapons[i.weapon]
+        print(string.format("  ^2%s (Hash: %s, Tint: %d)^0", w.label, weaponHash, w.tint))
+    end
+
+    print("^3=====================================^0")
+end, false)
+
+
+-- =============================================================================
+-- DEBUG/TEST COMMANDS
+-- =============================================================================
+
+if Config.Equipment.Debug then
+    -- Test-Command: Weapon direkt geben
+    RegisterCommand('testweapon', function(source, args, rawCommand)
+        local weaponName = args[1] or 'WEAPON_EXTINGUISHER_WATER'
+        local weaponHash = GetHashKey(weaponName)
+
+        local playerPed = PlayerPedId()
+
+        -- Weapon geben
+        GiveWeaponToPed(playerPed, weaponHash, 100, false, true)
+
+        print(string.format("^2[Equipment Test] Given weapon: %s (Hash: %s)^0", weaponName, weaponHash))
+        ClientUtils.Notify('success', "Test Weapon: " .. weaponName)
+    end, false)
+
+    -- Test-Command: Aktuelles Weapon anzeigen
+    RegisterCommand('checkweapon', function()
+        local playerPed = PlayerPedId()
+        local currentWeapon = GetSelectedPedWeapon(playerPed)
+
+        print(string.format("^3[Equipment Test] Current weapon hash: %s^0", currentWeapon))
+
+        -- Check ob es ein Equipment-Weapon ist
+        for weaponType, weaponData in pairs(EquipmentWeapons) do
+            if weaponData.hash == currentWeapon then
+                print(string.format("^2[Equipment Test] Matched: %s^0", weaponData.label))
+                ClientUtils.Notify('info', "Equipped: " .. weaponData.label)
+                return
+            end
+        end
+
+        ClientUtils.Notify('warning', "Kein Equipment equipped")
+    end, false)
+end
+
+-- =============================================================================
+-- EXPORTS
+-- =============================================================================
+
+exports('GetCurrentTool', GetCurrentTool)
+exports('HasTool', HasTool)
+exports('GetInventory', GetInventory)
+
+print("^2[Equipment Client] Loaded (Weapon-Based with Tints)^0")
