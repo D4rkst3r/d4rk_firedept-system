@@ -160,7 +160,7 @@ function UseTool(fireId)
     PlaySoundFrontend(-1, "PICKUP_WEAPON_BALL", "HUD_FRONTEND_WEAPONS_PICKUPS_SOUNDSET", true)
 
     -- An Server senden
-    TriggerServerEvent(Events.Fire.AttemptExtinguish, fireId, itemId)
+    TriggerServerEvent(Events.Fire.AttemptExtinguish, fireId, currentWeapon)
 
     ClientUtils.Notify('info', string.format("Benutze %s...", weaponData.label))
 

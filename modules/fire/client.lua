@@ -558,7 +558,7 @@ RegisterCommand('fd_extinguish', function()
     if nearFireWithExtinguisher then
         -- ✅ NEUE LOGIK: Check Equipment Module
         if IsModuleActive('equipment') then
-            local hasTool = exports['d4rk_firedept-system']:HasTool()
+            local hasTool = exports[GetCurrentResourceName()]:HasTool()
 
             if hasTool then
                 -- Nutze Equipment Module's UseTool Funktion
@@ -626,7 +626,7 @@ function StartInteractionLoop()
 
                     if IsModuleActive('equipment') then
                         -- Check ob Tool equipped
-                        local hasTool = exports['d4rk_firedept-system']:HasTool()
+                        local hasTool = exports[GetCurrentResourceName()]:HasTool()
 
                         if hasTool then
                             text = "~g~[E]~w~ Mit Tool löschen"
