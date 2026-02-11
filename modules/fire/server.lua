@@ -283,12 +283,13 @@ AddEventHandler(Events.Fire.RequestExtinguish, function(fireId)
     ExtinguishFire(fireId, source)
 end)
 
+
 -- =============================================================================
--- PROXIMITY-BASED EXTINGUISH (Für Gameplay)
+-- AUTO-EXTINGUISH SERVER UPDATE - Ersetze AttemptExtinguish Event Handler
 -- =============================================================================
 
 RegisterNetEvent(Events.Fire.AttemptExtinguish)
-AddEventHandler(Events.Fire.AttemptExtinguish, function(fireId, toolType)
+AddEventHandler(Events.Fire.AttemptExtinguish, function(fireId, weaponHash)
     ErrorHandler.SafeCall(function()
         local fire = activeFires[fireId]
         if not fire then
@@ -296,33 +297,120 @@ AddEventHandler(Events.Fire.AttemptExtinguish, function(fireId, toolType)
             return
         end
 
-        -- Rest der Funktion bleibt gleich...
-        local isEffective = true
+        -- =======================================================================
+        -- WEAPON EFFECTIVENESS SYSTEM 🔥
+        -- =======================================================================
 
-        fire.intensity = fire.intensity - 0.2
+        -- Hol Weapon-Daten
+        local weaponData = GetEquipmentWeapon(weaponHash)
+
+        if not weaponData then
+            if Config.Fire.Debug then
+                print(string.format("^1[Fire] Unknown weapon hash: %s^0", weaponHash))
+            end
+            return
+        end
+
+        -- Hol Brandklassen-Daten
+        local fireClass = fire.class
+        local effectiveness = weaponData.effectiveness[fireClass] or 0.0
+
+        if Config.Fire.Debug then
+            print(string.format(
+                "^3[Fire] %s vs Fire #%d (Class %s): %.0f%% effective^0",
+                weaponData.label,
+                fireId,
+                fireClass,
+                effectiveness * 100
+            ))
+        end
+
+        -- =======================================================================
+        -- EFFECTIVENESS CHECK
+        -- =======================================================================
+
+        if effectiveness <= 0.0 then
+            -- WIRKUNGSLOS!
+            TriggerClientEvent('chat:addMessage', source, {
+                color = { 255, 50, 50 },
+                args = { "Feuerwehr", string.format(
+                    "%s ist WIRKUNGSLOS gegen Brandklasse %s!",
+                    weaponData.label,
+                    fireClass
+                ) }
+            })
+            return
+        end
+
+        if effectiveness < 0.5 then
+            -- WENIG EFFEKTIV (Warnung)
+            TriggerClientEvent('chat:addMessage', source, {
+                color = { 255, 150, 0 },
+                args = { "Feuerwehr", string.format(
+                    "⚠️ %s ist NICHT optimal für Klasse %s!",
+                    weaponData.label,
+                    fireClass
+                ) }
+            })
+        end
+
+        -- =======================================================================
+        -- FIRE INTENSITY REDUCTION
+        -- =======================================================================
+
+        -- Berechne Reduktion basierend auf Effectiveness + ExtinguishRate
+        local baseReduction = weaponData.extinguishRate or 0.3
+        local effectiveReduction = baseReduction * effectiveness
+
+        -- Alte Intensity speichern für Feedback
+        local oldIntensity = fire.intensity
+
+        -- Neue Intensity berechnen
+        fire.intensity = fire.intensity - effectiveReduction
+
+        if Config.Fire.Debug then
+            print(string.format(
+                "^3[Fire] Intensity: %.2f → %.2f (-%0.2f)^0",
+                oldIntensity,
+                fire.intensity,
+                effectiveReduction
+            ))
+        end
+
+        -- =======================================================================
+        -- FIRE GELÖSCHT?
+        -- =======================================================================
 
         if fire.intensity <= 0 then
+            -- KOMPLETT GELÖSCHT! 🎉
             ExtinguishFire(fireId, source)
 
             TriggerClientEvent('chat:addMessage', source, {
                 color = { 0, 255, 0 },
-                args = { "Feuerwehr", "Feuer erfolgreich gelöscht! +50 XP" }
+                args = { "Feuerwehr", "✅ Feuer erfolgreich gelöscht! +50 XP" }
             })
+
+            -- TODO: XP System hinzufügen
+            -- AddPlayerXP(source, 50)
         else
+            -- Noch nicht gelöscht, Update senden
             TriggerClientEvent(Events.Fire.Update, -1, fireId, fire)
+
+            -- Feedback
+            local percentRemaining = (fire.intensity / oldIntensity) * 100
 
             TriggerClientEvent('chat:addMessage', source, {
                 color = { 255, 200, 0 },
-                args = { "Feuerwehr", string.format("Feuer reduziert! Intensität: %.1f", fire.intensity) }
+                args = { "Feuerwehr", string.format(
+                    "Feuer reduziert! Noch %.0f%% übrig",
+                    percentRemaining
+                ) }
             })
         end
     end, function(err)
         ErrorHandler.Error('Fire', 'Failed to attempt extinguish', { fireId = fireId, error = err })
     end)
 end)
-
-
-
 
 -- =============================================================================
 -- ADMIN COMMANDS

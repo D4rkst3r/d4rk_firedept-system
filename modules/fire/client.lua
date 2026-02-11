@@ -7,6 +7,9 @@ local playerInSmoke = false
 local currentVisibility = 1.0
 local nearFireWithExtinguisher = nil
 
+local lastExtinguishAttempt = 0
+local extinguishCooldown = 500 -- Millisekunden zwischen Lösch-Checks
+
 -- =============================================================================
 -- MODUL REGISTRIERUNG
 -- =============================================================================
@@ -40,6 +43,7 @@ function StartFireModule()
     AddEventHandler(Events.Fire.Update, UpdateFirePoint)
 
     StartFireLoop()
+    StartAutoExtinguishLoop() -- ✅ DIESE ZEILE HINZUFÜGEN!
     StartInteractionLoop()
 end
 
@@ -61,6 +65,145 @@ function StopFireModule()
 
     -- Tabelle leeren
     activeFires = {}
+end
+
+-- =============================================================================
+-- AUTO-EXTINGUISH SYSTEM 🔥
+-- =============================================================================
+
+
+
+function StartAutoExtinguishLoop()
+    --[[
+        HAUPTFUNKTION: Auto-Extinguish System
+
+        WAS MACHT ES?
+        1. Check ob Spieler mit Feuerlöscher schießt
+        2. Raycast vom Spieler in Blickrichtung
+        3. Check ob Raycast ein Feuer trifft
+        4. Sende Lösch-Request an Server
+    ]]
+
+    Citizen.CreateThread(function()
+        print("^2[Fire Module] Auto-Extinguish Loop started^0")
+
+        while IsModuleActive('fire') do
+            local playerPed = PlayerPedId()
+
+            -- Check ob Spieler schießt
+            if IsPedShooting(playerPed) then
+                -- Check ob Feuerlöscher equipped
+                local currentWeapon = GetSelectedPedWeapon(playerPed)
+
+                if IsExtinguisher(currentWeapon) then
+                    -- Cooldown Check
+                    local now = GetGameTimer()
+                    if (now - lastExtinguishAttempt) >= extinguishCooldown then
+                        -- Raycast zu Feuer
+                        local hitFire, fireId = RaycastToFire()
+
+                        if hitFire and fireId then
+                            -- TREFFER! Sende an Server
+                            if Config.Fire.Debug then
+                                local weapon = GetEquipmentWeapon(currentWeapon)
+                                print(string.format("^2[Auto-Extinguish] Hit fire #%d with %s^0",
+                                    fireId,
+                                    weapon and weapon.label or "Unknown"
+                                ))
+                            end
+
+                            TriggerServerEvent(Events.Fire.AttemptExtinguish, fireId, currentWeapon)
+                            lastExtinguishAttempt = now
+                        end
+                    end
+                end
+            end
+
+            Citizen.Wait(50) -- 20 FPS
+        end
+
+        print("^1[Fire Module] Auto-Extinguish Loop stopped^0")
+    end)
+end
+
+function RaycastToFire()
+    --[[
+        RAYCAST: Findet Feuer in Schussrichtung
+
+        RETURN:
+        - hitFire (boolean)
+        - fireId (number)
+    ]]
+
+    local camCoords = GetGameplayCamCoord()
+    local camRot = GetGameplayCamRot(2)
+
+    local direction = RotationToDirection(camRot)
+    local destination = camCoords + (direction * 50.0)
+
+    -- Check alle Feuer
+    for fireId, fire in pairs(activeFires) do
+        local distanceToRay = GetDistanceToRay(camCoords, destination, fire.coords)
+
+        if distanceToRay < 1.5 then -- 1.5m Toleranz
+            local playerCoords = GetEntityCoords(PlayerPedId())
+            local distanceToPlayer = #(playerCoords - fire.coords)
+
+            local currentWeapon = GetSelectedPedWeapon(PlayerPedId())
+            local weaponData = GetEquipmentWeapon(currentWeapon)
+
+            if weaponData and distanceToPlayer <= weaponData.range then
+                return true, fireId
+            end
+        end
+    end
+
+    return false, nil
+end
+
+function RotationToDirection(rotation)
+    --[[
+        Camera Rotation → Richtungsvektor
+    ]]
+
+    local adjustedRotation = vector3(
+        (math.pi / 180) * rotation.x,
+        (math.pi / 180) * rotation.y,
+        (math.pi / 180) * rotation.z
+    )
+
+    local direction = vector3(
+        -math.sin(adjustedRotation.z) * math.abs(math.cos(adjustedRotation.x)),
+        math.cos(adjustedRotation.z) * math.abs(math.cos(adjustedRotation.x)),
+        math.sin(adjustedRotation.x)
+    )
+
+    return direction
+end
+
+function GetDistanceToRay(rayStart, rayEnd, point)
+    --[[
+        Kürzeste Distanz von Punkt zu Linie
+    ]]
+
+    local rayDirection = rayEnd - rayStart
+    local rayLength = #rayDirection
+    rayDirection = rayDirection / rayLength
+
+    local pointToStart = point - rayStart
+    local projection = vector3(
+        pointToStart.x * rayDirection.x,
+        pointToStart.y * rayDirection.y,
+        pointToStart.z * rayDirection.z
+    )
+
+    local projectionLength = projection.x + projection.y + projection.z
+    projectionLength = math.max(0.0, math.min(rayLength, projectionLength))
+
+    local closestPoint = rayStart + (rayDirection * projectionLength)
+    local distance = #(point - closestPoint)
+
+    return distance
 end
 
 -- =============================================================================
